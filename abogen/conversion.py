@@ -44,6 +44,7 @@ from abogen.subtitle_utils import (
     _CHAPTER_MARKER_SEARCH_PATTERN,
 )
 
+
 class CountdownDialog(QDialog):
     """Base dialog with auto-accept countdown functionality"""
 
@@ -331,7 +332,7 @@ class ConversionThread(QThread):
                 if (i % 20 == 0 or is_last) and len(segments) > 1:
                     progress_percent = int((samples_processed / total_samples) * 100)
                     self.log_updated.emit(
-                        f"{progress_prefix} segment {i+1}/{len(segments)} ({progress_percent}% complete)"
+                        f"{progress_prefix} segment {i + 1}/{len(segments)} ({progress_percent}% complete)"
                     )
 
                 # Process this segment
@@ -458,6 +459,10 @@ class ConversionThread(QThread):
                 self.log_updated.emit(
                     f"- Output folder: {self.output_folder or os.getcwd()}"
                 )
+            elif self.save_option == "AudioBookshelf structure":
+                self.log_updated.emit(
+                    f"- AudioBookshelf library: {self.output_folder or os.getcwd()}"
+                )
 
             self.log_updated.emit(("\nInitializing TTS pipeline...", "grey"))
 
@@ -524,7 +529,6 @@ class ConversionThread(QThread):
             # Clean up text using utility function
             text = clean_text(text)
 
-
             # --- Chapter splitting logic ---
             # Use pre-compiled pattern for better performance
             chapter_splits = list(_CHAPTER_MARKER_SEARCH_PATTERN.finditer(text))
@@ -565,7 +569,6 @@ class ConversionThread(QThread):
                 )
                 and not self.chapter_options_set
             ):
-
                 # Emit signal to main thread and wait
                 self.chapters_detected.emit(total_chapters)
                 self._chapter_options_event.wait()
@@ -577,7 +580,7 @@ class ConversionThread(QThread):
             # Log all detected chapters at the beginning
             if total_chapters > 1:
                 chapter_list = "\n".join(
-                    [f"{i+1}) {c[0]}" for i, c in enumerate(chapters)]
+                    [f"{i + 1}) {c[0]}" for i, c in enumerate(chapters)]
                 )
                 self.log_updated.emit(
                     (f"\nDetected chapters ({total_chapters}):\n" + chapter_list)
@@ -612,6 +615,9 @@ class ConversionThread(QThread):
                 parent_dir = user_desktop_dir()
             elif self.save_option == "Save next to input file":
                 parent_dir = os.path.dirname(base_path)
+            elif self.save_option == "AudioBookshelf structure":
+                # AudioBookshelf structure will be handled differently
+                parent_dir = self.output_folder or os.getcwd()
             else:
                 parent_dir = self.output_folder or os.getcwd()
             # Ensure the output folder exists, error if it doesn't
@@ -622,27 +628,35 @@ class ConversionThread(QThread):
                         "red",
                     )
                 )
-            # Find a unique suffix for both folder and merged file, always
-            counter = 1
-            allowed_exts = set(SUPPORTED_SOUND_FORMATS + SUPPORTED_SUBTITLE_FORMATS)
-            while True:
-                suffix = f"_{counter}" if counter > 1 else ""
-                chapters_out_dir_candidate = os.path.join(
-                    parent_dir, f"{sanitized_base_name}{suffix}_chapters"
+            # Handle AudioBookshelf structure
+            if self.save_option == "AudioBookshelf structure":
+                # Create AudioBookshelf-compatible directory structure
+                audiobookshelf_dir = self._create_audiobookshelf_directory_structure(
+                    parent_dir
                 )
-                # Only check for files with allowed extensions (extension without dot, case-insensitive)
-                # Use generator expression to avoid processing all files upfront
-                file_parts = (
-                    os.path.splitext(fname) for fname in os.listdir(parent_dir)
-                )
-                clash = any(
-                    name == f"{sanitized_base_name}{suffix}"
-                    and ext[1:].lower() in allowed_exts
-                    for name, ext in file_parts
-                )
-                if not os.path.exists(chapters_out_dir_candidate) and not clash:
-                    break
-                counter += 1
+                chapters_out_dir_candidate = audiobookshelf_dir
+            else:
+                # Find a unique suffix for both folder and merged file, always
+                counter = 1
+                allowed_exts = set(SUPPORTED_SOUND_FORMATS + SUPPORTED_SUBTITLE_FORMATS)
+                while True:
+                    suffix = f"_{counter}" if counter > 1 else ""
+                    chapters_out_dir_candidate = os.path.join(
+                        parent_dir, f"{sanitized_base_name}{suffix}_chapters"
+                    )
+                    # Only check for files with allowed extensions (extension without dot, case-insensitive)
+                    # Use generator expression to avoid processing all files upfront
+                    file_parts = (
+                        os.path.splitext(fname) for fname in os.listdir(parent_dir)
+                    )
+                    clash = any(
+                        name == f"{sanitized_base_name}{suffix}"
+                        and ext[1:].lower() in allowed_exts
+                        for name, ext in file_parts
+                    )
+                    if not os.path.exists(chapters_out_dir_candidate) and not clash:
+                        break
+                    counter += 1
             if save_chapters_separately and total_chapters > 1:
                 separate_chapters_format = getattr(
                     self, "separate_chapters_format", "wav"
@@ -881,8 +895,14 @@ class ConversionThread(QThread):
                         pos = sanitized[:MAX_LEN].rfind("_")
                         sanitized = sanitized[: pos if pos > 0 else MAX_LEN].rstrip("_")
                     chapter_filename = f"{chapter_idx:02d}_{sanitized}"
+
+                    # Create disc subfolder if using AudioBookshelf structure and we have many chapters
+                    actual_chapters_dir = self._get_chapter_output_dir(
+                        chapters_out_dir, chapter_idx, total_chapters
+                    )
+
                     chapter_out_path = os.path.join(
-                        chapters_out_dir,
+                        actual_chapters_dir,
                         f"{chapter_filename}.{separate_chapters_format}",
                     )
                     if separate_chapters_format in ["wav", "mp3", "flac"]:
@@ -933,7 +953,7 @@ class ConversionThread(QThread):
                         subtitle_format = getattr(self, "subtitle_format", "srt")
                         file_extension = "ass" if "ass" in subtitle_format else "srt"
                         chapter_subtitle_path = os.path.join(
-                            chapters_out_dir, f"{chapter_filename}.{file_extension}"
+                            actual_chapters_dir, f"{chapter_filename}.{file_extension}"
                         )
                         # Ensure these variables exist even when not using ASS so
                         # later code can safely reference them.
@@ -1335,8 +1355,8 @@ class ConversionThread(QThread):
                                 chapter_title = chapter["chapter"].replace("=", "\\=")
                                 f.write(f"[CHAPTER]\n")
                                 f.write(f"TIMEBASE=1/1000\n")
-                                f.write(f"START={int(chapter['start']*1000)}\n")
-                                f.write(f"END={int(chapter['end']*1000)}\n")
+                                f.write(f"START={int(chapter['start'] * 1000)}\n")
+                                f.write(f"END={int(chapter['end'] * 1000)}\n")
                                 f.write(f"title={chapter_title}\n\n")
                         # Fast mux chapters into m4b (write to temp file, then replace original)
                         static_ffmpeg.add_paths()
@@ -1466,15 +1486,18 @@ class ConversionThread(QThread):
             # Setup output paths
             base_name = os.path.splitext(os.path.basename(base_path))[0]
             sanitized_base_name = sanitize_name_for_os(base_name, is_folder=True)
-            parent_dir = (
-                user_desktop_dir()
-                if self.save_option == "Save to Desktop"
-                else (
-                    os.path.dirname(base_path)
-                    if self.save_option == "Save next to input file"
-                    else self.output_folder or os.getcwd()
+            if self.save_option == "Save to Desktop":
+                parent_dir = user_desktop_dir()
+            elif self.save_option == "Save next to input file":
+                parent_dir = os.path.dirname(base_path)
+            elif self.save_option == "AudioBookshelf structure":
+                # For single file output with AudioBookshelf structure
+                audiobookshelf_dir = self._create_audiobookshelf_directory_structure(
+                    self.output_folder or os.getcwd()
                 )
-            )
+                parent_dir = audiobookshelf_dir
+            else:
+                parent_dir = self.output_folder or os.getcwd()
 
             if not os.path.exists(parent_dir):
                 self.log_updated.emit(
@@ -1870,7 +1893,7 @@ class ConversionThread(QThread):
                 etr_str = (
                     "Processing..."
                     if elapsed <= 0.5
-                    else f"{int(elapsed*(len(subtitles)-idx)/idx)//3600:02d}:{(int(elapsed*(len(subtitles)-idx)/idx)%3600)//60:02d}:{int(elapsed*(len(subtitles)-idx)/idx)%60:02d}"
+                    else f"{int(elapsed * (len(subtitles) - idx) / idx) // 3600:02d}:{(int(elapsed * (len(subtitles) - idx) / idx) % 3600) // 60:02d}:{int(elapsed * (len(subtitles) - idx) / idx) % 60:02d}"
                 )
                 self.progress_updated.emit(percent, etr_str)
 
@@ -1958,6 +1981,16 @@ class ConversionThread(QThread):
         cover_match = re.search(r"<<METADATA_COVER_PATH:([^>]*)>>", text)
         cover_path = cover_match.group(1) if cover_match else None
 
+        # AudioBookshelf-specific metadata fields
+        language_match = re.search(r"<<METADATA_LANGUAGE:([^>]*)>>", text)
+        series_match = re.search(r"<<METADATA_SERIES:([^>]*)>>", text)
+        series_part_match = re.search(r"<<METADATA_SERIES_PART:([^>]*)>>", text)
+        isbn_match = re.search(r"<<METADATA_ISBN:([^>]*)>>", text)
+        asin_match = re.search(r"<<METADATA_ASIN:([^>]*)>>", text)
+        publisher_match = re.search(r"<<METADATA_PUBLISHER:([^>]*)>>", text)
+        description_match = re.search(r"<<METADATA_DESCRIPTION:([^>]*)>>", text)
+        narrator_match = re.search(r"<<METADATA_NARRATOR:([^>]*)>>", text)
+
         # Use display path or filename as fallback for title
 
         # Use file_name for logs if from_queue, otherwise use display_path if available
@@ -2019,8 +2052,525 @@ class ConversionThread(QThread):
         else:
             metadata_options.extend(["-metadata", f"genre=Audiobook"])
 
+        # Add AudioBookshelf-specific metadata
+        if language_match:
+            metadata_options.extend(
+                ["-metadata", f"language={language_match.group(1)}"]
+            )
+
+        if series_match:
+            metadata_options.extend(["-metadata", f"series={series_match.group(1)}"])
+            # For M4B files, also add as show (TV series equivalent)
+            metadata_options.extend(["-metadata", f"show={series_match.group(1)}"])
+
+        if series_part_match:
+            metadata_options.extend(
+                ["-metadata", f"track={series_part_match.group(1)}"]
+            )
+            # Also add as episode number for AudioBookshelf
+            metadata_options.extend(
+                ["-metadata", f"episode_id={series_part_match.group(1)}"]
+            )
+
+        if isbn_match:
+            metadata_options.extend(["-metadata", f"isbn={isbn_match.group(1)}"])
+
+        if asin_match:
+            metadata_options.extend(["-metadata", f"asin={asin_match.group(1)}"])
+
+        if publisher_match:
+            metadata_options.extend(
+                ["-metadata", f"publisher={publisher_match.group(1)}"]
+            )
+
+        if description_match:
+            metadata_options.extend(
+                ["-metadata", f"description={description_match.group(1)}"]
+            )
+            # Also add as comment for broader compatibility
+            metadata_options.extend(
+                ["-metadata", f"comment={description_match.group(1)}"]
+            )
+
+        # Use narrator from METADATA_NARRATOR if available, otherwise use composer
+        if narrator_match:
+            metadata_options.extend(
+                ["-metadata", f"narrator={narrator_match.group(1)}"]
+            )
+
         # Add these to ffmpeg command
         return metadata_options, cover_path
+
+    def _create_audiobookshelf_directory_structure(
+        self, base_output_dir, metadata_dict=None
+    ):
+        """
+        Create AudioBookshelf-compatible directory structure.
+        Returns the path where audio files should be placed.
+
+        Expected structure: Author/Series/Title/
+        If no series, falls back to: Author/Title/
+        """
+        # Extract metadata from the text or use provided metadata
+        if metadata_dict is None:
+            text = ""
+            if self.is_direct_text:
+                text = self.file_name
+            else:
+                try:
+                    encoding = detect_encoding(self.file_name)
+                    with open(
+                        self.file_name, "r", encoding=encoding, errors="replace"
+                    ) as file:
+                        text = file.read()
+                except Exception:
+                    text = ""
+
+            # Parse metadata from text
+            title_match = re.search(r"<<METADATA_TITLE:([^>]*)>>", text)
+            artist_match = re.search(r"<<METADATA_ARTIST:([^>]*)>>", text)
+            album_match = re.search(r"<<METADATA_ALBUM:([^>]*)>>", text)
+
+            # Use metadata if available, otherwise use filename
+            title = title_match.group(1) if title_match else self._get_safe_filename()
+            artist = artist_match.group(1) if artist_match else "Unknown Author"
+            series = None
+
+            # Check if album is different from title (could indicate series)
+            if album_match and album_match.group(1) != title:
+                series = album_match.group(1)
+        else:
+            # Use provided metadata dictionary
+            title = metadata_dict.get("title", self._get_safe_filename())
+            artist = metadata_dict.get("author", "Unknown Author")
+            series = metadata_dict.get("series")
+
+        # Sanitize folder names for filesystem
+        def sanitize_folder_name(name):
+            if not name or name.strip() == "":
+                return "Unknown"
+            # Remove invalid characters for folder names
+            sanitized = re.sub(r'[<>:"/\\|?*]', "", name.strip())
+            # Replace multiple spaces with single space
+            sanitized = re.sub(r"\s+", " ", sanitized)
+            return sanitized[:100]  # Limit length to avoid path issues
+
+        # Extract additional metadata for enhanced folder naming
+        year_match = (
+            re.search(r"<<METADATA_YEAR:([^>]*)>>", text) if not metadata_dict else None
+        )
+        series_part_match = (
+            re.search(r"<<METADATA_SERIES_PART:([^>]*)>>", text)
+            if not metadata_dict
+            else None
+        )
+        narrator_match = (
+            re.search(r"<<METADATA_NARRATOR:([^>]*)>>", text)
+            if not metadata_dict
+            else None
+        )
+
+        year = (
+            year_match.group(1)
+            if year_match
+            else (metadata_dict.get("year") if metadata_dict else None)
+        )
+        series_part = (
+            series_part_match.group(1)
+            if series_part_match
+            else (metadata_dict.get("series_sequence") if metadata_dict else None)
+        )
+        narrator = (
+            narrator_match.group(1)
+            if narrator_match
+            else (metadata_dict.get("narrator") if metadata_dict else None)
+        )
+
+        # Create AudioBookshelf-style title folder name
+        title_folder_name = self._create_audiobookshelf_title_folder_name(
+            title, year, series_part, narrator
+        )
+
+        # Format author names for AudioBookshelf compatibility
+        formatted_author = self._format_audiobookshelf_author_name(artist)
+        author_folder = sanitize_folder_name(formatted_author)
+        title_folder = sanitize_folder_name(title_folder_name)
+
+        # Create path based on whether we have series information
+        if series and series.strip():
+            series_folder = sanitize_folder_name(series)
+            book_dir = os.path.join(
+                base_output_dir, author_folder, series_folder, title_folder
+            )
+        else:
+            book_dir = os.path.join(base_output_dir, author_folder, title_folder)
+
+        # Create the directory structure
+        os.makedirs(book_dir, exist_ok=True)
+
+        # Store the base book directory for potential disc subfolder creation
+        self._audiobookshelf_book_dir = book_dir
+
+        # Create AudioBookshelf metadata files if we have metadata
+        self._create_audiobookshelf_metadata_files(book_dir)
+
+        return book_dir
+
+    def _create_audiobookshelf_metadata_files(self, book_dir):
+        """Create AudioBookshelf metadata files (desc.txt, reader.txt, .opf) in the book directory."""
+        if not os.path.exists(book_dir):
+            return
+
+        # Extract metadata from text
+        text = ""
+        if self.is_direct_text:
+            text = self.file_name
+        else:
+            try:
+                encoding = detect_encoding(self.file_name)
+                with open(
+                    self.file_name, "r", encoding=encoding, errors="replace"
+                ) as file:
+                    text = file.read()
+            except Exception:
+                text = ""
+
+        # Parse metadata from text
+        title_match = re.search(r"<<METADATA_TITLE:([^>]*)>>", text)
+        artist_match = re.search(r"<<METADATA_ARTIST:([^>]*)>>", text)
+        description_match = re.search(r"<<METADATA_DESCRIPTION:([^>]*)>>", text)
+        narrator_match = re.search(r"<<METADATA_NARRATOR:([^>]*)>>", text)
+        genre_match = re.search(r"<<METADATA_GENRE:([^>]*)>>", text)
+        series_match = re.search(r"<<METADATA_SERIES:([^>]*)>>", text)
+        series_part_match = re.search(r"<<METADATA_SERIES_PART:([^>]*)>>", text)
+        year_match = re.search(r"<<METADATA_YEAR:([^>]*)>>", text)
+        publisher_match = re.search(r"<<METADATA_PUBLISHER:([^>]*)>>", text)
+        language_match = re.search(r"<<METADATA_LANGUAGE:([^>]*)>>", text)
+        isbn_match = re.search(r"<<METADATA_ISBN:([^>]*)>>", text)
+
+        # Create desc.txt if we have description
+        if description_match and description_match.group(1).strip():
+            desc_path = os.path.join(book_dir, "desc.txt")
+            try:
+                with open(desc_path, "w", encoding="utf-8") as f:
+                    f.write(description_match.group(1).strip())
+                self.log_updated.emit(f"Created desc.txt")
+            except Exception as e:
+                self.log_updated.emit(
+                    (f"Warning: Could not create desc.txt: {e}", "orange")
+                )
+
+        # Create reader.txt if we have narrator
+        narrator = "Narrator"  # Default
+        if narrator_match and narrator_match.group(1).strip():
+            narrator = narrator_match.group(1).strip()
+
+        reader_path = os.path.join(book_dir, "reader.txt")
+        try:
+            with open(reader_path, "w", encoding="utf-8") as f:
+                f.write(narrator)
+            self.log_updated.emit(f"Created reader.txt")
+        except Exception as e:
+            self.log_updated.emit(
+                (f"Warning: Could not create reader.txt: {e}", "orange")
+            )
+
+        # Create OPF file with structured metadata
+        opf_path = os.path.join(book_dir, "metadata.opf")
+        try:
+            # Extract values with fallbacks
+            title = title_match.group(1) if title_match else self._get_safe_filename()
+            author = artist_match.group(1) if artist_match else "Unknown Author"
+            genre = genre_match.group(1) if genre_match else "Audiobook"
+            year = year_match.group(1) if year_match else ""
+            publisher = publisher_match.group(1) if publisher_match else ""
+            language = language_match.group(1) if language_match else "en"
+            isbn = isbn_match.group(1) if isbn_match else ""
+            description = description_match.group(1) if description_match else ""
+            series = series_match.group(1) if series_match else ""
+            series_part = series_part_match.group(1) if series_part_match else ""
+
+            opf_content = f"""<?xml version="1.0" encoding="utf-8"?>
+<package version="2.0" unique-identifier="uuid_id" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>{title}</dc:title>
+    <dc:creator opf:role="aut">{author}</dc:creator>
+    <dc:contributor opf:role="nrt">{narrator}</dc:contributor>
+    <dc:language>{language}</dc:language>
+    <dc:subject>{genre}</dc:subject>"""
+
+            if year:
+                opf_content += f"\n    <dc:date>{year}</dc:date>"
+            if publisher:
+                opf_content += f"\n    <dc:publisher>{publisher}</dc:publisher>"
+            if isbn:
+                opf_content += (
+                    f'\n    <dc:identifier opf:scheme="ISBN">{isbn}</dc:identifier>'
+                )
+            if description:
+                opf_content += f"\n    <dc:description>{description}</dc:description>"
+            if series:
+                opf_content += f'\n    <meta name="calibre:series" content="{series}"/>'
+                if series_part:
+                    opf_content += f'\n    <meta name="calibre:series_index" content="{series_part}"/>'
+
+            opf_content += """
+  </metadata>
+  <manifest>
+  </manifest>
+  <spine>
+  </spine>
+</package>"""
+
+            with open(opf_path, "w", encoding="utf-8") as f:
+                f.write(opf_content)
+            self.log_updated.emit(f"Created metadata.opf")
+        except Exception as e:
+            self.log_updated.emit(
+                (f"Warning: Could not create metadata.opf: {e}", "orange")
+            )
+
+        # Copy original EPUB file if available and if we're using AudioBookshelf structure
+        self._copy_original_epub_file(book_dir)
+
+    def _copy_original_epub_file(self, book_dir):
+        """Copy the original EPUB file to the AudioBookshelf directory if available."""
+        try:
+            # Check if we have an original book file path (for EPUB/PDF files)
+            original_file_path = None
+
+            # save_base_path should contain the original EPUB/PDF file path when processing those files
+            if hasattr(self, "save_base_path") and self.save_base_path:
+                if os.path.exists(self.save_base_path) and os.path.isfile(
+                    self.save_base_path
+                ):
+                    original_file_path = self.save_base_path
+
+            # If not found, check if file_name is a book file that should be copied
+            if not original_file_path and hasattr(self, "file_name") and self.file_name:
+                if (
+                    not self.is_direct_text
+                    and os.path.exists(self.file_name)
+                    and os.path.isfile(self.file_name)
+                ):
+                    file_ext = os.path.splitext(self.file_name)[1].lower()
+                    # Only copy book files, not temporary text files
+                    if file_ext in [".epub", ".pdf", ".mobi", ".azw3", ".azw"]:
+                        original_file_path = self.file_name
+
+            if original_file_path:
+                import shutil
+
+                filename = os.path.basename(original_file_path)
+                dest_path = os.path.join(book_dir, filename)
+
+                # Only copy if the destination doesn't exist or is different
+                if not os.path.exists(dest_path) or not os.path.samefile(
+                    original_file_path, dest_path
+                ):
+                    shutil.copy2(original_file_path, dest_path)
+                    self.log_updated.emit(f"Copied original file: {filename}")
+                else:
+                    self.log_updated.emit(f"Original file already present: {filename}")
+            else:
+                # This is expected for text input or when no original book file is available
+                pass
+
+        except Exception as e:
+            self.log_updated.emit(
+                (f"Warning: Could not copy original file: {e}", "orange")
+            )
+
+    def _create_audiobookshelf_title_folder_name(
+        self, title, year=None, series_part=None, narrator=None
+    ):
+        """
+        Create AudioBookshelf-compatible title folder name with optional year, series sequence, and narrator.
+
+        Examples:
+        - "Title"
+        - "1994 - Title"
+        - "Book 1 - Title"
+        - "1994 - Book 1 - Title"
+        - "Title {Narrator Name}"
+        - "1994 - Book 1 - Title {Narrator Name}"
+        """
+        folder_name_parts = []
+
+        # Add year if available (4-digit year)
+        if year and year.strip():
+            # Extract 4-digit year
+            year_match = re.search(r"\b(19|20)\d{2}\b", str(year))
+            if year_match:
+                folder_name_parts.append(year_match.group(0))
+
+        # Add series sequence if available
+        if series_part and series_part.strip():
+            try:
+                # Handle different series part formats
+                part_str = str(series_part).strip()
+                if part_str.replace(".", "").isdigit():
+                    # Numeric series part
+                    if "." in part_str:
+                        folder_name_parts.append(f"Vol {part_str}")
+                    else:
+                        folder_name_parts.append(f"Book {part_str}")
+                else:
+                    # Non-numeric series part, use as-is with "Vol"
+                    folder_name_parts.append(f"Vol {part_str}")
+            except Exception:
+                # If there's any issue, use as-is
+                folder_name_parts.append(f"Book {series_part}")
+
+        # Add title
+        folder_name_parts.append(title)
+
+        # Join parts with " - "
+        folder_name = " - ".join(folder_name_parts)
+
+        # Add narrator in curly braces if available
+        if narrator and narrator.strip() and narrator.strip().lower() != "narrator":
+            folder_name += f" {{{narrator.strip()}}}"
+
+        return folder_name
+
+    def _format_audiobookshelf_author_name(self, author_string):
+        """
+        Format author names for AudioBookshelf compatibility.
+
+        Supports multiple authors with proper separators and "Last, First" format detection.
+        Examples:
+        - "John Doe" → "John Doe"
+        - "Doe, John" → "Doe, John" (preserved if already in Last, First format)
+        - "John Doe; Jane Smith" → "John Doe, Jane Smith"
+        - "John Doe and Jane Smith" → "John Doe & Jane Smith"
+        """
+        if not author_string or not author_string.strip():
+            return "Unknown Author"
+
+        author_string = author_string.strip()
+
+        # Split on various separators (semicolon, and, &, comma followed by capital letter)
+        # But preserve "Last, First" format within individual authors
+
+        # First, split on obvious multi-author separators
+        authors = []
+
+        # Split on semicolon
+        if ";" in author_string:
+            potential_authors = author_string.split(";")
+        # Split on " and " (with spaces)
+        elif " and " in author_string.lower():
+            potential_authors = re.split(
+                r"\s+and\s+", author_string, flags=re.IGNORECASE
+            )
+        # Split on " & " (with spaces)
+        elif " & " in author_string:
+            potential_authors = author_string.split(" & ")
+        # Handle comma-separated authors (but not Last, First format)
+        elif "," in author_string:
+            # This is tricky - need to distinguish between "Last, First" and "Author1, Author2"
+            parts = author_string.split(",")
+            if len(parts) == 2:
+                # Could be "Last, First" or "Author1, Author2"
+                # Heuristic: if second part is a single word (likely first name), treat as "Last, First"
+                second_part = parts[1].strip()
+                if len(second_part.split()) == 1 and second_part[0].isupper():
+                    # Likely "Last, First" format
+                    potential_authors = [author_string]
+                else:
+                    # Likely multiple authors
+                    potential_authors = parts
+            else:
+                # Multiple commas - likely multiple authors
+                # But check for "Last, First" pattern in pairs
+                formatted_authors = []
+                i = 0
+                while i < len(parts):
+                    if i + 1 < len(parts):
+                        # Check if this looks like "Last, First"
+                        current = parts[i].strip()
+                        next_part = parts[i + 1].strip()
+                        if (
+                            len(next_part.split()) == 1
+                            and next_part[0].isupper()
+                            and len(current.split()) == 1
+                        ):
+                            # Looks like "Last, First"
+                            formatted_authors.append(f"{current}, {next_part}")
+                            i += 2
+                        else:
+                            formatted_authors.append(current)
+                            i += 1
+                    else:
+                        formatted_authors.append(parts[i].strip())
+                        i += 1
+                potential_authors = formatted_authors
+        else:
+            # Single author or no clear separators
+            potential_authors = [author_string]
+
+        # Clean up and format each author
+        formatted_authors = []
+        for author in potential_authors:
+            author = author.strip()
+            if author:
+                formatted_authors.append(author)
+
+        # Join with AudioBookshelf-preferred separators
+        if len(formatted_authors) == 1:
+            return formatted_authors[0]
+        elif len(formatted_authors) == 2:
+            # Use & for two authors
+            return f"{formatted_authors[0]} & {formatted_authors[1]}"
+        else:
+            # Use commas for multiple authors, with "and" before the last
+            if len(formatted_authors) > 2:
+                return (
+                    ", ".join(formatted_authors[:-1]) + f" and {formatted_authors[-1]}"
+                )
+            else:
+                return ", ".join(formatted_authors)
+
+    def _get_chapter_output_dir(self, base_chapters_dir, chapter_idx, total_chapters):
+        """
+        Determine the output directory for a chapter file, creating disc subfolders if appropriate.
+
+        Creates disc subfolders for AudioBookshelf when:
+        - Using AudioBookshelf structure
+        - Have many chapters (>= 20) that could represent multiple discs
+
+        Returns the appropriate directory path for the chapter file.
+        """
+        # Only create disc subfolders for AudioBookshelf structure with many chapters
+        if (
+            self.save_option == "AudioBookshelf structure"
+            and hasattr(self, "_audiobookshelf_book_dir")
+            and total_chapters >= 20
+        ):
+            # Calculate which disc this chapter belongs to (20 chapters per disc)
+            chapters_per_disc = 20
+            disc_num = ((chapter_idx - 1) // chapters_per_disc) + 1
+
+            # Create disc subfolder name (AudioBookshelf format)
+            disc_folder = f"Disc {disc_num:02d}"
+            disc_dir = os.path.join(base_chapters_dir, disc_folder)
+
+            # Create the disc directory if it doesn't exist
+            os.makedirs(disc_dir, exist_ok=True)
+
+            return disc_dir
+        else:
+            # Use the base chapters directory (no disc subfolders)
+            return base_chapters_dir
+
+    def _get_safe_filename(self):
+        """Get a safe filename from the current file."""
+        if self.is_direct_text:
+            return "Direct Text Input"
+
+        base_name = os.path.splitext(os.path.basename(self.file_name))[0]
+        return base_name if base_name else "Unknown Title"
 
     def _srt_time(self, t):
         """Helper function to format time for SRT files"""
@@ -2387,7 +2937,6 @@ class VoicePreviewThread(QThread):
 
         # Generate the preview and save to cache
         try:
-
             # Set device based on use_gpu setting and platform
             if self.use_gpu:
                 if platform.system() == "Darwin" and platform.processor() == "arm":
