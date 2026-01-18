@@ -783,6 +783,112 @@ def migrate_subtitle_format(config):
         save_config(config)
 
 
+def detect_ffmpeg_encoders():
+    """Detect available ffmpeg encoders for different formats."""
+    try:
+        import static_ffmpeg
+
+        static_ffmpeg.add_paths()
+
+        result = subprocess.run(
+            ["ffmpeg", "-encoders"], capture_output=True, text=True, timeout=10
+        )
+
+        encoders = {}
+
+        if result.returncode == 0:
+            lines = result.stdout.split("\n")
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith("---") or "Encoders:" in line:
+                    continue
+
+                if line.startswith("A"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        encoder_name = parts[1]
+
+                        if "aac" in encoder_name.lower():
+                            if "aac" not in encoders:
+                                encoders["aac"] = []
+                            encoders["aac"].append(encoder_name)
+                        elif (
+                            "mp3" in encoder_name.lower()
+                            or "libmp3lame" == encoder_name
+                        ):
+                            if "mp3" not in encoders:
+                                encoders["mp3"] = []
+                            encoders["mp3"].append(encoder_name)
+                        elif "opus" in encoder_name.lower():
+                            if "opus" not in encoders:
+                                encoders["opus"] = []
+                            encoders["opus"].append(encoder_name)
+                        elif "flac" in encoder_name.lower():
+                            if "flac" not in encoders:
+                                encoders["flac"] = []
+                            encoders["flac"].append(encoder_name)
+
+        return encoders
+    except Exception:
+        return {}
+
+
+def get_audio_format_config():
+    """Get audio format configuration with available encoders."""
+    encoders = detect_ffmpeg_encoders()
+
+    formats = {
+        "wav": {
+            "name": "WAV (Uncompressed)",
+            "container": "wav",
+            "encoders": ["pcm_s16le"],
+            "default_encoder": "pcm_s16le",
+            "supports_bitrate": False,
+            "extension": "wav",
+        },
+        "flac": {
+            "name": "FLAC (Lossless)",
+            "container": "flac",
+            "encoders": encoders.get("flac", ["flac"]),
+            "default_encoder": "flac",
+            "supports_bitrate": False,
+            "extension": "flac",
+        },
+        "mp3": {
+            "name": "MP3",
+            "container": "mp3",
+            "encoders": encoders.get("mp3", ["libmp3lame"]),
+            "default_encoder": "libmp3lame",
+            "supports_bitrate": True,
+            "bitrates": ["96k", "128k", "160k", "192k", "256k", "320k"],
+            "default_bitrate": "192k",
+            "extension": "mp3",
+        },
+        "aac": {
+            "name": "AAC (M4B with chapters)",
+            "container": "m4b",
+            "encoders": encoders.get("aac", ["aac"]),
+            "default_encoder": "aac",
+            "supports_bitrate": True,
+            "bitrates": ["96k", "128k", "160k", "192k", "256k", "320k"],
+            "default_bitrate": "160k",
+            "extension": "m4b",
+        },
+        "opus": {
+            "name": "Opus (Best compression)",
+            "container": "opus",
+            "encoders": encoders.get("opus", ["libopus"]),
+            "default_encoder": "libopus",
+            "supports_bitrate": True,
+            "bitrates": ["64k", "96k", "128k", "160k", "192k", "256k"],
+            "default_bitrate": "128k",
+            "extension": "opus",
+        },
+    }
+
+    return formats
+
+
 class abogen(QWidget):
     def __init__(self):
         super().__init__()
@@ -827,7 +933,15 @@ class abogen(QWidget):
         self.silence_duration = self.config.get(
             "silence_duration", 2.0
         )  # Default silence duration
-        self.selected_format = self.config.get("selected_format", "wav")
+        # Load audio format configuration
+        self.audio_formats = get_audio_format_config()
+
+        # Load format settings with new structure
+        self.selected_format = self.config.get(
+            "selected_format", "aac"
+        )  # Default to AAC for AudioBookshelf
+        self.selected_encoder = self.config.get("selected_encoder", None)
+        self.selected_bitrate = self.config.get("selected_bitrate", None)
         self.separate_chapters_format = self.config.get(
             "separate_chapters_format", "wav"
         )  # Format for individual chapter files
@@ -1077,10 +1191,12 @@ class abogen(QWidget):
         subtitle_layout.addWidget(self.subtitle_combo)
         controls_layout.addLayout(subtitle_layout)
 
-        # Output voice format
+        # Advanced audio format selection
         format_layout = QHBoxLayout()
         format_layout.setSpacing(7)
-        format_label = QLabel("Output voice format:", self)
+
+        # Format dropdown
+        format_label = QLabel("Format:", self)
         format_layout.addWidget(format_label)
         self.format_combo = QComboBox(self)
         self.format_combo.setStyleSheet(
@@ -1089,24 +1205,51 @@ class abogen(QWidget):
         self.format_combo.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        # Add items with display labels and underlying keys
-        for key, label in [
-            ("wav", "wav"),
-            ("flac", "flac"),
-            ("mp3", "mp3"),
-            ("opus", "opus (best compression)"),
-            ("m4b", "m4b (with chapters)"),
-        ]:
-            self.format_combo.addItem(label, key)
-        # Initialize selection by matching saved key
+
+        # Encoder dropdown
+        encoder_label = QLabel("Encoder:", self)
+        format_layout.addWidget(encoder_label)
+        self.encoder_combo = QComboBox(self)
+        self.encoder_combo.setStyleSheet(
+            "QComboBox { min-height: 20px; padding: 6px 12px; }"
+        )
+        self.encoder_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+
+        # Bitrate dropdown
+        bitrate_label = QLabel("Bitrate:", self)
+        format_layout.addWidget(bitrate_label)
+        self.bitrate_combo = QComboBox(self)
+        self.bitrate_combo.setStyleSheet(
+            "QComboBox { min-height: 20px; padding: 6px 12px; }"
+        )
+        self.bitrate_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+
+        # Populate format dropdown
+        for key, config in self.audio_formats.items():
+            self.format_combo.addItem(config["name"], key)
+
+        # Initialize selection
         idx = self.format_combo.findData(self.selected_format)
         if idx >= 0:
             self.format_combo.setCurrentIndex(idx)
-        # Map selection back to key on change
-        self.format_combo.currentIndexChanged.connect(
-            lambda i: self.on_format_changed(self.format_combo.itemData(i))
-        )
+
+        # Connect signals
+        self.format_combo.currentIndexChanged.connect(self.on_format_changed)
+        self.encoder_combo.currentIndexChanged.connect(self.on_encoder_changed)
+        self.bitrate_combo.currentIndexChanged.connect(self.on_bitrate_changed)
+
+        # Add to layout
         format_layout.addWidget(self.format_combo)
+        format_layout.addWidget(self.encoder_combo)
+        format_layout.addWidget(self.bitrate_combo)
+
+        # Initialize encoder and bitrate dropdowns
+        self.update_encoder_bitrate_options()
+
         controls_layout.addLayout(format_layout)
 
         # Output subtitle format
@@ -2169,7 +2312,7 @@ class abogen(QWidget):
                 self.save_option,
                 self.selected_output_folder,
                 subtitle_mode=actual_subtitle_mode,
-                output_format=self.selected_format,
+                output_format=self.get_output_format_for_conversion(),
                 np_module=np_module,
                 kpipeline_class=kpipeline_class,
                 start_time=self.start_time,
@@ -2947,10 +3090,124 @@ class abogen(QWidget):
             # Ignore errors interacting with model (defensive)
             pass
 
-    def on_format_changed(self, fmt):
-        self.selected_format = fmt
-        self.config["selected_format"] = fmt
+    def update_encoder_bitrate_options(self):
+        """Update encoder and bitrate dropdowns based on selected format."""
+        format_key = self.format_combo.currentData()
+        if not format_key or format_key not in self.audio_formats:
+            return
+
+        format_config = self.audio_formats[format_key]
+
+        # Update encoder dropdown
+        self.encoder_combo.clear()
+        encoders = format_config["encoders"]
+        if len(encoders) > 1:
+            self.encoder_combo.setEnabled(True)
+            for encoder in encoders:
+                # Create friendly names for common encoders
+                display_name = encoder
+                if encoder == "aac":
+                    display_name = "AAC (System Default)"
+                elif encoder == "aac_at":
+                    display_name = "AAC (Apple AudioToolbox)"
+                elif encoder == "libfdk_aac":
+                    display_name = "AAC (Fraunhofer FDK)"
+                elif encoder == "libmp3lame":
+                    display_name = "MP3 (LAME)"
+                elif encoder == "libopus":
+                    display_name = "Opus (libopus)"
+                elif encoder == "flac":
+                    display_name = "FLAC (Native)"
+                elif encoder == "pcm_s16le":
+                    display_name = "PCM 16-bit"
+
+                self.encoder_combo.addItem(display_name, encoder)
+
+            # Set current encoder
+            if self.selected_encoder:
+                idx = self.encoder_combo.findData(self.selected_encoder)
+                if idx >= 0:
+                    self.encoder_combo.setCurrentIndex(idx)
+            else:
+                # Set default encoder
+                default_encoder = format_config["default_encoder"]
+                idx = self.encoder_combo.findData(default_encoder)
+                if idx >= 0:
+                    self.encoder_combo.setCurrentIndex(idx)
+                    self.selected_encoder = default_encoder
+        else:
+            self.encoder_combo.setEnabled(False)
+            self.encoder_combo.addItem(
+                "Default", encoders[0] if encoders else "default"
+            )
+            self.selected_encoder = encoders[0] if encoders else None
+
+        # Update bitrate dropdown
+        self.bitrate_combo.clear()
+        if format_config.get("supports_bitrate", False):
+            self.bitrate_combo.setEnabled(True)
+            bitrates = format_config.get("bitrates", [])
+            for bitrate in bitrates:
+                self.bitrate_combo.addItem(bitrate, bitrate)
+
+            # Set current bitrate
+            if self.selected_bitrate:
+                idx = self.bitrate_combo.findData(self.selected_bitrate)
+                if idx >= 0:
+                    self.bitrate_combo.setCurrentIndex(idx)
+            else:
+                # Set default bitrate
+                default_bitrate = format_config.get(
+                    "default_bitrate", bitrates[0] if bitrates else None
+                )
+                if default_bitrate:
+                    idx = self.bitrate_combo.findData(default_bitrate)
+                    if idx >= 0:
+                        self.bitrate_combo.setCurrentIndex(idx)
+                        self.selected_bitrate = default_bitrate
+        else:
+            self.bitrate_combo.setEnabled(False)
+            self.bitrate_combo.addItem("N/A", None)
+            self.selected_bitrate = None
+
+    def on_format_changed(self, index):
+        """Handle format dropdown change."""
+        format_key = self.format_combo.currentData()
+        self.selected_format = format_key
+        self.config["selected_format"] = format_key
+
+        # Update encoder and bitrate options
+        self.update_encoder_bitrate_options()
+
+        # Save all current settings
+        self.config["selected_encoder"] = self.selected_encoder
+        self.config["selected_bitrate"] = self.selected_bitrate
         save_config(self.config)
+
+    def on_encoder_changed(self, index):
+        """Handle encoder dropdown change."""
+        encoder = self.encoder_combo.currentData()
+        self.selected_encoder = encoder
+        self.config["selected_encoder"] = encoder
+        save_config(self.config)
+
+    def on_bitrate_changed(self, index):
+        """Handle bitrate dropdown change."""
+        bitrate = self.bitrate_combo.currentData()
+        self.selected_bitrate = bitrate
+        self.config["selected_bitrate"] = bitrate
+        save_config(self.config)
+
+    def get_output_format_for_conversion(self):
+        """Get the output format in the old format for compatibility."""
+        # Map new format system back to old format system for conversion.py compatibility
+        format_key = self.selected_format
+        if format_key == "aac":
+            return "m4b"  # AAC goes into M4B container
+        elif format_key in ["wav", "flac", "mp3", "opus"]:
+            return format_key
+        else:
+            return "wav"  # Fallback
 
     def on_gpu_setting_changed(self, state):
         self.use_gpu = state == Qt.CheckState.Checked.value

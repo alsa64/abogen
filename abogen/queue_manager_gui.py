@@ -461,7 +461,11 @@ class QueueManager(QDialog):
             else:
                 attrs["subtitle_mode"] = getattr(parent, "subtitle_mode", "")
             # output_format
-            attrs["output_format"] = getattr(parent, "selected_format", "")
+            attrs["output_format"] = getattr(
+                parent,
+                "get_output_format_for_conversion",
+                lambda: getattr(parent, "selected_format", "wav"),
+            )()
             # total_char_count
             attrs["total_char_count"] = getattr(parent, "char_count", "")
             # replace_single_newlines
@@ -827,7 +831,7 @@ class QueueManager(QDialog):
         # Save the override state to config so it persists globally
         self.config["queue_override_settings"] = self.override_chk.isChecked()
         save_config(self.config)
-        
+
         super().accept()
 
     def reject(self):
