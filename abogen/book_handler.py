@@ -2286,10 +2286,6 @@ class HandlerDialog(QDialog):
         )  # Use publication year if available
 
         # Count chapters/pages
-        total_chapters = len(self.checked_chapters)
-        chapter_text = (
-            f"{total_chapters} {'Chapters' if self.file_type == 'epub' else 'Pages'}"
-        )
 
         # Handle cover image
         cover_tag = ""
@@ -2327,7 +2323,7 @@ class HandlerDialog(QDialog):
             if series_sequence:
                 album += f" - Book {series_sequence}"
         else:
-            album = f"{title} ({chapter_text})"
+            album = f"{title}"
 
         # Format metadata tags
         metadata_tags = [
