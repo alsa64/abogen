@@ -827,7 +827,8 @@ class abogen(QWidget):
             "separate_chapters_format", "wav"
         )  # Format for individual chapter files
         self.use_gpu = self.config.get(
-            "use_gpu", True  # Load GPU setting with default True
+            "use_gpu",
+            True,  # Load GPU setting with default True
         )
         self.replace_single_newlines = self.config.get("replace_single_newlines", True)
         self.use_silent_gaps = self.config.get("use_silent_gaps", True)
@@ -1191,6 +1192,7 @@ class abogen(QWidget):
             "Save next to input file",
             "Save to Desktop",
             "Choose output folder",
+            "AudioBookshelf structure",
         ]
         self.save_combo.addItems(save_options)
         self.save_combo.setStyleSheet(
@@ -1960,7 +1962,7 @@ class abogen(QWidget):
             # Reload config to capture the new "Override" setting
             # The QueueManager writes to disk, so we must refresh our local copy
             self.config = load_config()
-            
+
             # re-enable/disable buttons based on queue state
             self.enable_disable_queue_buttons()
 
@@ -1976,15 +1978,15 @@ class abogen(QWidget):
     def start_next_queued_item(self):
         if self.current_queue_index < len(self.queued_items):
             queued_item = self.queued_items[self.current_queue_index]
-            
+
             self.selected_file = queued_item.file_name
             self.char_count = queued_item.total_char_count
-            
+
             # Restore the original file path for save location (Important for EPUB/PDF)
             self.displayed_file_path = (
                 queued_item.save_base_path or queued_item.file_name
             )
-            
+
             # Restore chapter options (Structure specific, must be preserved)
             self.save_chapters_separately = getattr(
                 queued_item, "save_chapters_separately", None
@@ -1997,7 +1999,7 @@ class abogen(QWidget):
             if not self.config.get("queue_override_settings", False):
                 self.selected_lang = queued_item.lang_code
                 self.speed_slider.setValue(int(queued_item.speed * 100))
-                
+
                 # Load the specific voice string
                 self.selected_voice = queued_item.voice
                 # Clear complex GUI states so the specific voice string is used
@@ -2016,19 +2018,19 @@ class abogen(QWidget):
                     queued_item, "subtitle_speed_method", "tts"
                 )
 
-                # This ensures that if conversion.py (or utils) reads from config/disk 
+                # This ensures that if conversion.py (or utils) reads from config/disk
                 # instead of using passed arguments, it sees the correct queue values.
                 self.config["replace_single_newlines"] = self.replace_single_newlines
                 self.config["subtitle_mode"] = self.subtitle_mode
                 self.config["selected_format"] = self.selected_format
                 self.config["use_silent_gaps"] = self.use_silent_gaps
                 self.config["subtitle_speed_method"] = self.subtitle_speed_method
-                
+
                 # Sync Voice/Profile in config
                 self.config["selected_voice"] = self.selected_voice
                 if "selected_profile_name" in self.config:
                     del self.config["selected_profile_name"]
-                
+
                 # Note: Speed is already synced via self.speed_slider.setValue() -> update_speed_label()
                 save_config(self.config)
 
@@ -2246,17 +2248,16 @@ class abogen(QWidget):
             g_newlines = self.replace_single_newlines
             g_silent_gaps = self.use_silent_gaps
             g_speed_method = self.subtitle_speed_method
-        
+
         # Build HTML summary (Default Styling)
         summary_html = "<html><body>"
-        
+
         header_text = "Queue finished"
         if override_active:
             header_text += " (Global Settings Applied)"
-            
+
         summary_html += (
-            f"<h2>{header_text}</h2>"
-            f"Processed {len(self.queued_items)} items:<br><br>"
+            f"<h2>{header_text}</h2>Processed {len(self.queued_items)} items:<br><br>"
         )
 
         for idx, item in enumerate(self.queued_items, 1):
@@ -2283,7 +2284,7 @@ class abogen(QWidget):
             # Retrieve File-Specific Data (Never Overridden)
             eff_chars = item.total_char_count
             eff_input = item.file_name
-            eff_output = getattr(item, "output_path", "Unknown") 
+            eff_output = getattr(item, "output_path", "Unknown")
             eff_save_sep = getattr(item, "save_chapters_separately", None)
             eff_merge = getattr(item, "merge_chapters_at_end", None)
 
@@ -2471,11 +2472,14 @@ class abogen(QWidget):
     def on_save_option_changed(self, option):
         self.save_option = option
         self.config["save_option"] = option
-        if option == "Choose output folder":
+        if option == "Choose output folder" or option == "AudioBookshelf structure":
             try:
-                folder = QFileDialog.getExistingDirectory(
-                    self, "Select Output Folder", ""
+                dialog_title = (
+                    "Select AudioBookshelf Library Folder"
+                    if option == "AudioBookshelf structure"
+                    else "Select Output Folder"
                 )
+                folder = QFileDialog.getExistingDirectory(self, dialog_title, "")
                 if folder:
                     self.selected_output_folder = folder
                     self.save_path_label.setText(folder)
@@ -3023,7 +3027,6 @@ class abogen(QWidget):
             self.cancel_conversion()
 
     def apply_theme(self, theme):
-
         app = QApplication.instance()
         is_windows = platform.system() == "Windows"
         available_styles = [s.lower() for s in QStyleFactory.keys()]
@@ -3405,7 +3408,6 @@ class abogen(QWidget):
         save_config(self.config)
 
     def restart_app(self):
-
         import sys
 
         exe = sys.executable
