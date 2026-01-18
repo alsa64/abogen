@@ -5,41 +5,57 @@ build-backend = "hatchling.build"
 [project]
 name = "abogen"
 description = "Generate audiobooks from EPUBs, PDFs and text with synchronized captions."
-authors = [
-    { name="Deniz Şafak", email="denizsafak98@gmail.com" }
-]
+authors = [{ name = "Deniz Şafak", email = "denizsafak98@gmail.com" }]
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10, <3.13"
-keywords = ["audiobook", "epub", "pdf", "text-to-speech", "subtitle", "tts", "kokoro", "accessibility", "book-converter", "voice-synthesis", "multilingual", "chapter-management", "subtitles", "content-creation", "media-generation"]
+keywords = [
+  "audiobook",
+  "epub",
+  "pdf",
+  "text-to-speech",
+  "subtitle",
+  "tts",
+  "kokoro",
+  "accessibility",
+  "book-converter",
+  "voice-synthesis",
+  "multilingual",
+  "chapter-management",
+  "subtitles",
+  "content-creation",
+  "media-generation",
+]
 dependencies = [
-    "pip",
-    "PyQt6>=6.10.0",
-    "kokoro>=0.9.4",
-    "misaki[zh]>=0.9.4",
-    "ebooklib>=0.19",
-    "beautifulsoup4>=4.13.4",
-    "PyMuPDF>=1.25.5",
-    "platformdirs>=4.3.7",
-    "soundfile>=0.13.1",
-    "pygame>=2.6.1",
-    "charset_normalizer>=3.4.1",
-    "chardet>=5.2.0",
-    "static_ffmpeg>=2.13",
-    "Markdown>=3.9",
-    "spacy>=3.8.7"
+  "pip",
+  "PyQt6>=6.10.0",
+  "kokoro>=0.9.4",
+  "misaki[zh]>=0.9.4",
+  "ebooklib>=0.19",
+  "beautifulsoup4>=4.13.4",
+  "PyMuPDF>=1.25.5",
+  "platformdirs>=4.3.7",
+  "soundfile>=0.13.1",
+  "pygame>=2.6.1",
+  "charset_normalizer>=3.4.1",
+  "chardet>=5.2.0",
+  "static_ffmpeg>=2.13",
+  "Markdown>=3.9",
+  "spacy>=3.8.7",
+  "torch",
+  "en-core-web-sm",
 ]
 
 classifiers = [
-    "Intended Audience :: End Users/Desktop",
-    "Topic :: Multimedia :: Sound/Audio :: Conversion",
-    "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
-    "Topic :: Multimedia :: Sound/Audio :: Speech",
-    "Topic :: Text Processing",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Operating System :: OS Independent"
+  "Intended Audience :: End Users/Desktop",
+  "Topic :: Multimedia :: Sound/Audio :: Conversion",
+  "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Text Processing",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
 ]
 
 dynamic = ["version"]
@@ -58,11 +74,11 @@ abogen-cli = "abogen.main:main"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-    "/.github",
-    "/demo",
-    "/abogen/resources",
-    "/abogen/assets/create_shortcuts.bat",
-    "WINDOWS_INSTALL.bat",
+  "/.github",
+  "/demo",
+  "/abogen/resources",
+  "/abogen/assets/create_shortcuts.bat",
+  "WINDOWS_INSTALL.bat",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -76,13 +92,13 @@ pattern = "^(?P<version>.+)$"
 
 [project.optional-dependencies]
 # NVIDIA GPU (Windows) (CUDA 12.6)       # uv tool install abogen[cuda126]
-cuda126 = ["torch"]
+# cuda126 = ["torch"]
 # NVIDIA GPU (Windows) (CUDA 12.8)       # uv tool install abogen[cuda]
 cuda = ["torch"]
 # NVIDIA GPU (Windows) (CUDA 13.0)       # uv tool install abogen[cuda130]
-cuda130 = ["torch"]
+# cuda130 = ["torch"]
 # AMD GPU (Linux) (ROCm 6.4)             # uv tool install abogen[rocm]
-rocm = ["torch", "pytorch-triton-rocm"]
+# rocm = ["torch", "pytorch-triton-rocm"]
 # Development dependencies               # uv tool install abogen[dev]
 dev = ["build"]
 
@@ -91,30 +107,31 @@ dev = ["build"]
 [tool.uv.sources]
 kokoro = [
   { git = "https://github.com/hexgrad/kokoro.git", marker = "sys_platform == 'darwin'" },
-  { index = "pypi", marker = "sys_platform != 'darwin'" }
+  { index = "pypi", marker = "sys_platform != 'darwin'" },
 ]
 
 # --- TORCH CONFIGURATION ---
 
 torch = [
   # ROCm 6.4 Nightly (AMD)
-  { index = "pytorch-rocm-64-nightly", marker = "extra == 'rocm'" },
+  # { index = "pytorch-rocm-64-nightly", marker = "extra == 'rocm'" },
 
   # CUDA 13.0 (NVIDIA)
   { index = "pytorch-cuda-130", marker = "extra == 'cuda130' and extra != 'rocm'" },
 
   # CUDA 12.6 (NVIDIA)
-  { index = "pytorch-cuda-126", marker = "extra == 'cuda126' and extra != 'rocm' and extra != 'cuda130'" },
+  # { index = "pytorch-cuda-126", marker = "extra == 'cuda126' and extra != 'rocm' and extra != 'cuda130'" },
 
   # CUDA 12.8 (NVIDIA)
-  { index = "pytorch-cuda-128", marker = "extra == 'cuda' and extra != 'rocm' and extra != 'cuda130' and extra != 'cuda126'" }
+  # { index = "pytorch-cuda-128", marker = "extra == 'cuda' and extra != 'rocm' and extra != 'cuda130' and extra != 'cuda126'" },
 ]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 # --- TRITON CONFIGURATION ---
 
-pytorch-triton-rocm = [
-  { index = "pytorch-rocm-64-nightly", marker = "extra == 'rocm'" }
-]
+# pytorch-triton-rocm = [
+#   { index = "pytorch-rocm-64-nightly", marker = "extra == 'rocm'" },
+# ]
 
 # --- INDEX DEFINITIONS ---
 
@@ -125,16 +142,16 @@ url = "https://pypi.org/simple"
 default = true
 
 # CUDA 12.6 Index
-[[tool.uv.index]]
-name = "pytorch-cuda-126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
+# [[tool.uv.index]]
+# name = "pytorch-cuda-126"
+# url = "https://download.pytorch.org/whl/cu126"
+# explicit = true
 
 # CUDA 12.8 Index
-[[tool.uv.index]]
-name = "pytorch-cuda-128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
+# [[tool.uv.index]]
+# name = "pytorch-cuda-128"
+# url = "https://download.pytorch.org/whl/cu128"
+# explicit = true
 
 # CUDA 13.0 Index
 [[tool.uv.index]]
@@ -143,7 +160,7 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 # ROCm 6.4 Nightly Index
-[[tool.uv.index]]
-name = "pytorch-rocm-64-nightly"
-url = "https://download.pytorch.org/whl/nightly/rocm6.4"
-explicit = true
+# [[tool.uv.index]]
+# name = "pytorch-rocm-64-nightly"
+# url = "https://download.pytorch.org/whl/nightly/rocm6.4"
+# explicit = true
