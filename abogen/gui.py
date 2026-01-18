@@ -5,6 +5,7 @@ import tempfile
 import platform
 import base64
 import re
+import subprocess
 from abogen.queue_manager_gui import QueueManager
 from abogen.queued_item import QueuedItem
 import abogen.hf_tracker as hf_tracker
@@ -90,6 +91,7 @@ from abogen.constants import (
 import threading
 from abogen.voice_formula_gui import VoiceFormulaDialog
 from abogen.voice_profiles import load_profiles
+from abogen.pronunciation import get_pronunciation_config_path
 
 # Import ctypes for Windows-specific taskbar icon
 if platform.system() == "Windows":
@@ -3611,6 +3613,11 @@ class abogen(QWidget):
         )
         menu.addAction(spacy_action)
 
+        # Add pronunciation config option
+        pronunciation_action = QAction("Edit pronunciation configuration", self)
+        pronunciation_action.triggered.connect(self.open_pronunciation_config)
+        menu.addAction(pronunciation_action)
+
         # Add separator
         menu.addSeparator()
 
@@ -3785,6 +3792,37 @@ class abogen(QWidget):
         except Exception as e:
             QMessageBox.critical(
                 self, "Cache Directory Error", f"Could not open cache directory:\n{e}"
+            )
+
+    def open_pronunciation_config(self):
+        """Open the pronunciation configuration file in the system's default editor."""
+        try:
+            config_path = get_pronunciation_config_path()
+
+            # Ensure config file exists by loading/saving it
+            from abogen.pronunciation import (
+                load_pronunciation_config,
+                save_pronunciation_config,
+            )
+
+            config = load_pronunciation_config()
+            save_pronunciation_config(
+                config
+            )  # This will create the file if it doesn't exist
+
+            # Open with system default editor
+            if platform.system() == "Windows":
+                os.startfile(config_path)
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.call(["open", config_path])
+            else:  # Linux and other Unix-like systems
+                subprocess.call(["xdg-open", config_path])
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Pronunciation Config Error",
+                f"Could not open pronunciation configuration file:\n{e}",
             )
 
     def add_shortcut_to_desktop(self):

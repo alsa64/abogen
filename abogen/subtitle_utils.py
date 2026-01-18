@@ -60,6 +60,14 @@ def calculate_text_length(text):
 def clean_text(text, *args, **kwargs):
     # Remove metadata tags first
     text = _METADATA_TAG_PATTERN.sub("", text)
+
+    try:
+        from abogen.pronunciation import apply_pronunciation_overrides
+
+        text = apply_pronunciation_overrides(text)
+    except ImportError:
+        pass
+
     # Load replace_single_newlines from config
     cfg = load_config()
     replace_single_newlines = cfg.get("replace_single_newlines", True)
