@@ -570,6 +570,13 @@ class HandlerDialog(QDialog):
                         else:
                             li.insert(0, NavigableString(number_text))
 
+                # Add line breaks after paragraphs, divs, and headings for proper spacing
+                for tag in soup.find_all(["p", "div"]):
+                    tag.append("\n\n")
+
+                for tag in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
+                    tag.append("\n\n")
+
                 # Remove sup and sub tags
                 for tag in soup.find_all(["sup", "sub"]):
                     tag.decompose()
@@ -881,6 +888,10 @@ class HandlerDialog(QDialog):
                 for tag in slice_soup.find_all(["p", "div"]):
                     tag.append("\n\n")
 
+                # Add line breaks after heading tags to ensure proper spacing
+                for tag in slice_soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
+                    tag.append("\n\n")
+
                 # Handle ordered lists by prepending numbers to list items
                 for ol in slice_soup.find_all("ol"):
                     # Get start attribute or default to 1
@@ -930,6 +941,14 @@ class HandlerDialog(QDialog):
 
             if prefix_html.strip():
                 prefix_soup = BeautifulSoup(prefix_html, "html.parser")
+
+                # Add line breaks after paragraphs, divs, and headings for proper spacing
+                for tag in prefix_soup.find_all(["p", "div"]):
+                    tag.append("\n\n")
+
+                for tag in prefix_soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
+                    tag.append("\n\n")
+
                 for tag in prefix_soup.find_all(["sup", "sub"]):
                     tag.decompose()
                 prefix_text = clean_text(prefix_soup.get_text()).strip()
@@ -2042,6 +2061,13 @@ class HandlerDialog(QDialog):
             "cover_image": None,
             "publisher": None,
             "publication_year": None,
+            "genres": [],
+            "language": None,
+            "series": None,
+            "series_sequence": None,
+            "narrator": None,
+            "isbn": None,
+            "asin": None,
         }
 
         if self.file_type == "epub":
@@ -2088,6 +2114,72 @@ class HandlerDialog(QDialog):
                         metadata["publication_year"] = date_str
             except Exception as e:
                 logging.warning(f"Error extracting publication date metadata: {e}")
+
+            # Extract genre/subject metadata (maps to dc:subject for AudioBookshelf)
+            try:
+                subject_items = self.book.get_metadata("DC", "subject")
+                if subject_items:
+                    metadata["genres"] = [
+                        subject[0] for subject in subject_items if len(subject) > 0
+                    ]
+            except Exception as e:
+                logging.warning(f"Error extracting subject/genre metadata: {e}")
+
+            # Extract language metadata
+            try:
+                lang_items = self.book.get_metadata("DC", "language")
+                if lang_items and len(lang_items) > 0:
+                    metadata["language"] = lang_items[0][0]
+            except Exception as e:
+                logging.warning(f"Error extracting language metadata: {e}")
+
+            # Extract series information from OPF metadata
+            try:
+                # Try calibre-style series metadata first
+                series_items = self.book.get_metadata(None, "calibre:series")
+                if series_items and len(series_items) > 0:
+                    metadata["series"] = series_items[0][0]
+
+                series_index_items = self.book.get_metadata(
+                    None, "calibre:series_index"
+                )
+                if series_index_items and len(series_index_items) > 0:
+                    metadata["series_sequence"] = series_index_items[0][0]
+            except Exception as e:
+                logging.warning(f"Error extracting series metadata: {e}")
+
+            # Extract narrator information (often in contributor fields)
+            try:
+                contributor_items = self.book.get_metadata("DC", "contributor")
+                if contributor_items:
+                    for contrib in contributor_items:
+                        if (
+                            len(contrib) > 1
+                            and contrib[1]
+                            and "nrt" in contrib[1].lower()
+                        ):
+                            metadata["narrator"] = contrib[0]
+                            break
+            except Exception as e:
+                logging.warning(f"Error extracting narrator metadata: {e}")
+
+            # Extract ISBN
+            try:
+                isbn_items = self.book.get_metadata("DC", "identifier")
+                if isbn_items:
+                    for identifier in isbn_items:
+                        if len(identifier) > 1 and identifier[1]:
+                            if (
+                                "isbn" in identifier[1].lower()
+                                or identifier[0]
+                                .replace("-", "")
+                                .replace(" ", "")
+                                .isdigit()
+                            ):
+                                metadata["isbn"] = identifier[0]
+                                break
+            except Exception as e:
+                logging.warning(f"Error extracting ISBN metadata: {e}")
 
             for item in self.book.get_items_of_type(ebooklib.ITEM_COVER):
                 metadata["cover_image"] = item.get_content()
@@ -2260,16 +2352,65 @@ class HandlerDialog(QDialog):
             except Exception as e:
                 logging.warning(f"Failed to save cover image: {e}")
 
+        # Get narrator from metadata or default
+        narrator = metadata.get("narrator") or "Narrator"
+
+        # Get genre(s) - prefer extracted genres over default
+        genres = metadata.get("genres", [])
+        if genres:
+            # Join multiple genres with semicolon for AudioBookshelf compatibility
+            genre = "; ".join(genres)
+        else:
+            genre = "Audiobook"
+
+        # Get series information
+        series = metadata.get("series")
+        series_sequence = metadata.get("series_sequence")
+
+        # Format album field - use series name if available, otherwise title
+        if series:
+            album = f"{series}"
+            if series_sequence:
+                album += f" - Book {series_sequence}"
+        else:
+            album = f"{title} ({chapter_text})"
+
         # Format metadata tags
         metadata_tags = [
             f"<<METADATA_TITLE:{title}>>",
             f"<<METADATA_ARTIST:{authors_text}>>",
-            f"<<METADATA_ALBUM:{title} ({chapter_text})>>",
+            f"<<METADATA_ALBUM:{album}>>",
             f"<<METADATA_YEAR:{year}>>",
             f"<<METADATA_ALBUM_ARTIST:{album_artist}>>",
-            f"<<METADATA_COMPOSER:Narrator>>",
-            f"<<METADATA_GENRE:Audiobook>>",
+            f"<<METADATA_COMPOSER:{narrator}>>",
+            f"<<METADATA_GENRE:{genre}>>",
         ]
+
+        # Add AudioBookshelf-specific metadata if available
+        if metadata.get("language"):
+            metadata_tags.append(f"<<METADATA_LANGUAGE:{metadata['language']}>>")
+
+        if series:
+            metadata_tags.append(f"<<METADATA_SERIES:{series}>>")
+            if series_sequence:
+                metadata_tags.append(f"<<METADATA_SERIES_PART:{series_sequence}>>")
+
+        if metadata.get("isbn"):
+            metadata_tags.append(f"<<METADATA_ISBN:{metadata['isbn']}>>")
+
+        if metadata.get("asin"):
+            metadata_tags.append(f"<<METADATA_ASIN:{metadata['asin']}>>")
+
+        if metadata.get("publisher"):
+            metadata_tags.append(f"<<METADATA_PUBLISHER:{metadata['publisher']}>>")
+
+        if metadata.get("description"):
+            # Clean description for embedding (remove newlines)
+            clean_desc = metadata["description"].replace("\n", " ").replace("\r", " ")
+            metadata_tags.append(f"<<METADATA_DESCRIPTION:{clean_desc}>>")
+
+        # Add narrator as separate field for AudioBookshelf
+        metadata_tags.append(f"<<METADATA_NARRATOR:{narrator}>>")
 
         if cover_tag:
             metadata_tags.append(cover_tag)
