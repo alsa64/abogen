@@ -35,6 +35,7 @@ from abogen.utils import (
 from abogen.subtitle_utils import (
     clean_text,
     calculate_text_length,
+    smart_html_to_text,
 )
 
 import os
@@ -570,18 +571,7 @@ class HandlerDialog(QDialog):
                         else:
                             li.insert(0, NavigableString(number_text))
 
-                # Add line breaks after paragraphs, divs, and headings for proper spacing
-                for tag in soup.find_all(["p", "div"]):
-                    tag.append("\n\n")
-
-                for tag in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
-                    tag.append("\n\n")
-
-                # Remove sup and sub tags
-                for tag in soup.find_all(["sup", "sub"]):
-                    tag.decompose()
-
-                text = clean_text(soup.get_text()).strip()
+                text = clean_text(smart_html_to_text(html_content)).strip()
                 if text:
                     self.content_texts[doc_href] = text
                     self.content_lengths[doc_href] = calculate_text_length(text)
@@ -883,32 +873,7 @@ class HandlerDialog(QDialog):
                 )
                 slice_html = current_doc_html
             if slice_html.strip():
-                slice_soup = BeautifulSoup(slice_html, "html.parser")
-                # Add line breaks after paragraphs and divs
-                for tag in slice_soup.find_all(["p", "div"]):
-                    tag.append("\n\n")
-
-                # Add line breaks after heading tags to ensure proper spacing
-                for tag in slice_soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
-                    tag.append("\n\n")
-
-                # Handle ordered lists by prepending numbers to list items
-                for ol in slice_soup.find_all("ol"):
-                    # Get start attribute or default to 1
-                    start = int(ol.get("start", 1))
-                    for i, li in enumerate(ol.find_all("li", recursive=False)):
-                        # Insert the number at the beginning of the list item
-                        number_text = f"{start + i}) "
-                        if li.string:
-                            li.string.replace_with(number_text + li.string)
-                        else:
-                            li.insert(0, NavigableString(number_text))
-
-                # Remove sup and sub tags that might contain footnotes
-                for tag in slice_soup.find_all(["sup", "sub"]):
-                    tag.decompose()
-
-                text = clean_text(slice_soup.get_text()).strip()
+                text = clean_text(smart_html_to_text(slice_html)).strip()
                 if text:
                     self.content_texts[current_src] = text
                     self.content_lengths[current_src] = calculate_text_length(text)
@@ -940,18 +905,7 @@ class HandlerDialog(QDialog):
             prefix_html += first_doc_html[:first_pos]
 
             if prefix_html.strip():
-                prefix_soup = BeautifulSoup(prefix_html, "html.parser")
-
-                # Add line breaks after paragraphs, divs, and headings for proper spacing
-                for tag in prefix_soup.find_all(["p", "div"]):
-                    tag.append("\n\n")
-
-                for tag in prefix_soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
-                    tag.append("\n\n")
-
-                for tag in prefix_soup.find_all(["sup", "sub"]):
-                    tag.decompose()
-                prefix_text = clean_text(prefix_soup.get_text()).strip()
+                prefix_text = clean_text(smart_html_to_text(prefix_html)).strip()
 
                 if prefix_text:
                     prefix_chapter_src = "internal:prefix_content"

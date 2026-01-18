@@ -3,6 +3,13 @@ import platform
 from abogen.utils import detect_encoding, load_config
 from abogen.constants import SAMPLE_VOICE_TEXTS
 
+try:
+    from bs4 import BeautifulSoup, NavigableString
+
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+
 # Pre-compile frequently used regex patterns for better performance
 _METADATA_TAG_PATTERN = re.compile(r"<<METADATA_[^:]+:[^>]*>>")
 _WHITESPACE_PATTERN = re.compile(r"[^\S\n]+")
@@ -37,6 +44,7 @@ def clean_subtitle_text(text):
     text = _CHAPTER_MARKER_PATTERN.sub("", text)
     return text.strip()
 
+
 def calculate_text_length(text):
     # Use pre-compiled patterns for better performance
     # Ignore chapter markers and metadata patterns in a single pass
@@ -47,6 +55,7 @@ def calculate_text_length(text):
     # Calculate character count
     char_count = len(text)
     return char_count
+
 
 def clean_text(text, *args, **kwargs):
     # Remove metadata tags first
@@ -457,3 +466,146 @@ def sanitize_name_for_os(name, is_folder=True):
         sanitized = sanitized[:255].rstrip(". ")
 
     return sanitized
+
+
+def smart_html_to_text(html_content):
+    if not HAS_BS4:
+        return _HTML_TAG_PATTERN.sub("", html_content)
+
+    if not html_content or not html_content.strip():
+        return ""
+
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    BLOCK_ELEMENTS = {
+        "p",
+        "div",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "br",
+        "blockquote",
+        "section",
+        "article",
+        "main",
+        "header",
+        "footer",
+        "nav",
+        "aside",
+        "ul",
+        "ol",
+        "li",
+        "dl",
+        "dt",
+        "dd",
+        "pre",
+        "address",
+        "figure",
+        "figcaption",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "form",
+        "fieldset",
+        "legend",
+    }
+
+    INLINE_ELEMENTS = {
+        "a",
+        "span",
+        "em",
+        "strong",
+        "i",
+        "b",
+        "u",
+        "s",
+        "small",
+        "mark",
+        "del",
+        "ins",
+        "sub",
+        "sup",
+        "code",
+        "kbd",
+        "samp",
+        "var",
+        "time",
+        "abbr",
+        "dfn",
+        "q",
+        "cite",
+        "ruby",
+        "rt",
+        "rp",
+    }
+
+    for ol in soup.find_all("ol"):
+        start = int(ol.get("start", 1))
+        for i, li in enumerate(ol.find_all("li", recursive=False)):
+            number_text = f"{start + i}) "
+            if li.string:
+                li.string.replace_with(number_text + li.string)
+            else:
+                li.insert(0, number_text)
+
+    for tag in soup.find_all(["sup", "sub", "script", "style", "nav", "footer"]):
+        tag.decompose()
+
+    def extract_text_recursive(element, is_root=False):
+        if isinstance(element, str):
+            return element.strip()
+
+        if not hasattr(element, "name"):
+            return str(element).strip()
+
+        tag_name = element.name.lower() if element.name else ""
+
+        if tag_name == "br":
+            return "\n"
+        if tag_name == "hr":
+            return "\n\n---\n\n"
+
+        text_parts = []
+        for child in element.children:
+            child_text = extract_text_recursive(child)
+            if child_text:
+                text_parts.append(child_text)
+
+        content = " ".join(text_parts)
+
+        if tag_name in BLOCK_ELEMENTS:
+            if tag_name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+                return f"\n\n{content}\n\n"
+            elif tag_name in ["p", "div", "li"]:
+                return f"\n{content}\n"
+            elif tag_name in ["blockquote"]:
+                return f"\n\n{content}\n\n"
+            else:
+                return f"\n{content}\n" if content else ""
+        elif tag_name in INLINE_ELEMENTS:
+            return content
+        else:
+            if is_root:
+                return content
+            else:
+                return f"\n{content}\n" if content else ""
+
+    raw_text = extract_text_recursive(soup, is_root=True)
+
+    lines = []
+    for line in raw_text.split("\n"):
+        line = re.sub(r"\s+", " ", line).strip()
+        lines.append(line)
+
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"^\n+|\n+$", "", text)
+
+    return text
