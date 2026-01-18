@@ -790,8 +790,13 @@ class abogen(QWidget):
         self.apply_theme(self.config.get("theme", "system"))
         migrate_subtitle_format(self.config)
         self.check_updates = self.config.get("check_updates", True)
-        self.save_option = self.config.get("save_option", "Save next to input file")
-        self.selected_output_folder = self.config.get("selected_output_folder", None)
+        self.save_option = self.config.get("save_option", "AudioBookshelf structure")
+
+        # Set default AudioBookshelf directory
+        default_audiobooks_dir = os.path.expanduser("~/Books/AudioBooks")
+        self.selected_output_folder = self.config.get(
+            "selected_output_folder", default_audiobooks_dir
+        )
         self.selected_file = self.selected_file_type = self.selected_book_path = None
         self.displayed_file_path = (
             None  # Add new variable to track the displayed file path
@@ -1189,10 +1194,10 @@ class abogen(QWidget):
         save_layout.addWidget(save_label)
         self.save_combo = QComboBox(self)
         save_options = [
+            "AudioBookshelf structure",
             "Save next to input file",
             "Save to Desktop",
             "Choose output folder",
-            "AudioBookshelf structure",
         ]
         self.save_combo.addItems(save_options)
         self.save_combo.setStyleSheet(
@@ -1221,6 +1226,16 @@ class abogen(QWidget):
         save_path_row.addWidget(self.save_path_label)
         self.save_path_row_widget.hide()  # Hide the whole row by default
         controls_layout.addWidget(self.save_path_row_widget)
+
+        # Initialize save path display for AudioBookshelf structure
+        if (
+            self.save_option == "AudioBookshelf structure"
+            and self.selected_output_folder
+        ):
+            self.save_path_label.setText(self.selected_output_folder)
+            self.save_path_row_widget.show()
+            # Create the directory if it doesn't exist
+            os.makedirs(self.selected_output_folder, exist_ok=True)
 
         # GPU Acceleration Checkbox with Settings button
         gpu_layout = QHBoxLayout()
@@ -2472,28 +2487,39 @@ class abogen(QWidget):
     def on_save_option_changed(self, option):
         self.save_option = option
         self.config["save_option"] = option
-        if option == "Choose output folder" or option == "AudioBookshelf structure":
+
+        if option == "AudioBookshelf structure":
+            # Use default AudioBooks folder if not already set
+            if not self.selected_output_folder:
+                self.selected_output_folder = os.path.expanduser("~/Books/AudioBooks")
+                self.config["selected_output_folder"] = self.selected_output_folder
+
+            # Create the directory if it doesn't exist
+            os.makedirs(self.selected_output_folder, exist_ok=True)
+
+            # Show the path
+            self.save_path_label.setText(self.selected_output_folder)
+            self.save_path_row_widget.show()
+
+        elif option == "Choose output folder":
             try:
-                dialog_title = (
-                    "Select AudioBookshelf Library Folder"
-                    if option == "AudioBookshelf structure"
-                    else "Select Output Folder"
+                folder = QFileDialog.getExistingDirectory(
+                    self, "Select Output Folder", ""
                 )
-                folder = QFileDialog.getExistingDirectory(self, dialog_title, "")
                 if folder:
                     self.selected_output_folder = folder
                     self.save_path_label.setText(folder)
                     self.save_path_row_widget.show()
                     self.config["selected_output_folder"] = folder
                 else:
-                    self.save_option = "Save next to input file"
+                    self.save_option = "AudioBookshelf structure"
                     self.save_combo.setCurrentText(self.save_option)
                     self.config["save_option"] = self.save_option
             except Exception as e:
                 self._show_error_message_box(
                     "Folder Dialog Error", f"Could not open folder dialog:\n{e}"
                 )
-                self.save_option = "Save next to input file"
+                self.save_option = "AudioBookshelf structure"
                 self.save_combo.setCurrentText(self.save_option)
                 self.config["save_option"] = self.save_option
         else:
