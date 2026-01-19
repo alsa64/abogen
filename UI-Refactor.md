@@ -81,15 +81,15 @@ Transform abogen from a single-task interface to a modern, tabbed workflow with 
 - [ ] Create sidebar layout with placeholder widgets
 
 ### **Phase 2: Queue Management**
-- [ ] Implement queue item widgets with progress bars
+- [x] Implement queue item widgets with progress bars
 - [ ] Add drag & drop reordering functionality  
-- [ ] Add delete/duplicate item capabilities
-- [ ] Implement queue item selection and detail view
+- [x] Add delete/duplicate item capabilities
+- [x] Implement queue item selection and detail view
 
 ### **Phase 3: Settings Consolidation**
-- [ ] Create settings tab with grouped widgets
-- [ ] Move all settings from context menu to settings tab
-- [ ] Implement pronunciation settings sidebar
+- [x] Create settings tab with grouped widgets
+- [x] Move all settings from context menu to settings tab
+- [x] Implement pronunciation settings sidebar
 - [ ] Connect settings to queue processing
 
 ### **Phase 4: Processing Integration**

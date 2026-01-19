@@ -32,6 +32,12 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QMenu,
     QTabWidget,
+    QSplitter,
+    QListWidget,
+    QListWidgetItem,
+    QGroupBox,
+    QScrollArea,
+    QStatusBar,
 )
 from PyQt6.QtGui import QAction, QActionGroup
 from PyQt6.QtCore import (
@@ -93,6 +99,150 @@ import threading
 from abogen.voice_formula_gui import VoiceFormulaDialog
 from abogen.voice_profiles import load_profiles
 from abogen.pronunciation import get_pronunciation_config_path
+
+
+class QueueItemWidget(QWidget):
+    """Widget representing a single queue item with progress bar and status."""
+
+    def __init__(self, file_path, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+        self.status = "pending"  # pending, processing, completed, failed
+        self.progress = 0
+        self.selected_chapters = set()
+        self.individual_settings = {}
+
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(2)
+
+        # File name label
+        file_name = os.path.basename(self.file_path)
+        self.name_label = QLabel(file_name)
+        self.name_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(self.name_label)
+
+        # Status and progress layout
+        status_layout = QHBoxLayout()
+        self.status_label = QLabel("Pending")
+        self.status_label.setMinimumWidth(60)
+        status_layout.addWidget(self.status_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setVisible(False)
+        status_layout.addWidget(self.progress_bar)
+
+        layout.addLayout(status_layout)
+
+        # Update colors based on status
+        self.update_status_display()
+
+    def update_status_display(self):
+        """Update visual appearance based on current status."""
+        status_colors = {
+            "pending": "#666666",
+            "processing": "#0066cc",
+            "completed": "#00aa00",
+            "failed": "#cc0000",
+        }
+
+        self.status_label.setText(self.status.capitalize())
+        color = status_colors.get(self.status, "#666666")
+        self.status_label.setStyleSheet(f"color: {color};")
+
+        if self.status == "processing":
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setValue(self.progress)
+        elif self.status == "completed":
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setValue(100)
+        else:
+            self.progress_bar.setVisible(False)
+
+    def set_status(self, status, progress=None):
+        """Update item status and progress."""
+        self.status = status
+        if progress is not None:
+            self.progress = progress
+        self.update_status_display()
+
+
+class DropAreaWidget(QWidget):
+    """Drop area for adding new files to queue."""
+
+    files_dropped = pyqtSignal(list)  # Emit list of file paths
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 20, 10, 20)
+
+        # Drop zone styling
+        self.setStyleSheet("""
+            DropAreaWidget {
+                border: 2px dashed #cccccc;
+                border-radius: 8px;
+                background-color: #f9f9f9;
+            }
+            DropAreaWidget:hover {
+                border-color: #0066cc;
+                background-color: #f0f8ff;
+            }
+        """)
+
+        # Icons and text
+        drop_label = QLabel("📁 Drop files here")
+        drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        drop_label.setStyleSheet(
+            "font-size: 16px; color: #666666; border: none; background: transparent;"
+        )
+        layout.addWidget(drop_label)
+
+        supported_label = QLabel("EPUB, PDF, TXT, MD, SRT, ASS, VTT")
+        supported_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        supported_label.setStyleSheet(
+            "font-size: 12px; color: #999999; border: none; background: transparent;"
+        )
+        layout.addWidget(supported_label)
+
+        # Browse button
+        self.browse_btn = QPushButton("Browse Files...")
+        self.browse_btn.clicked.connect(self.browse_files)
+        layout.addWidget(self.browse_btn)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        file_paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+        if file_paths:
+            self.files_dropped.emit(file_paths)
+        event.acceptProposedAction()
+
+    def browse_files(self):
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Files",
+            "",
+            "Supported Files (*.txt *.epub *.pdf *.md *.srt *.ass *.vtt);;All Files (*)",
+        )
+        if file_paths:
+            self.files_dropped.emit(file_paths)
+
 
 # Import ctypes for Windows-specific taskbar icon
 if platform.system() == "Windows":
@@ -1058,6 +1208,18 @@ class abogen(QWidget):
         # Add tab widget to main layout
         main_layout.addWidget(self.tab_widget)
 
+        # Add status bar
+        self.status_bar = QStatusBar()
+        self.status_bar.showMessage("Ready")
+
+        # Global progress bar in status bar
+        self.global_progress = QProgressBar()
+        self.global_progress.setMaximumWidth(200)
+        self.global_progress.setVisible(False)
+        self.status_bar.addPermanentWidget(self.global_progress)
+
+        main_layout.addWidget(self.status_bar)
+
         # Set up tab contents
         self.setup_processing_tab()
         self.setup_settings_tab()
@@ -1065,31 +1227,750 @@ class abogen(QWidget):
         # Set main layout
         self.setLayout(main_layout)
 
-        # Temporarily preserve some essential attributes that other methods expect
-        # TODO: These will be moved to appropriate tabs in later phases
+        # Initialize essential attributes for compatibility
         self.audio_formats = get_audio_format_config()
         self.selected_format = self.config.get("selected_format", "aac")
         self.selected_encoder = None
         self.selected_bitrate = None
+        self.replace_single_newlines = self.config.get("replace_single_newlines", False)
+        self.use_spacy_segmentation = self.config.get("use_spacy_segmentation", True)
+        self.use_silent_gaps = self.config.get("use_silent_gaps", False)
+        self.gpu_ok = True  # TODO: Detect actual GPU availability
+        self.use_gpu = self.config.get("use_gpu", True)
+        self.separate_chapters_format = self.config.get(
+            "separate_chapters_format", "wav"
+        )
+        self.is_converting = False
 
         # Initialize flag to track if input box was cleared by queue
         self.input_box_cleared_by_queue = False
 
     def setup_processing_tab(self):
         """Set up the Processing tab with queue and processing controls."""
-        # TODO: Implement processing tab layout
+        # Main horizontal splitter
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left sidebar for queue management
+        sidebar = QWidget()
+        sidebar.setMinimumWidth(300)
+        sidebar.setMaximumWidth(400)
+        sidebar_layout = QVBoxLayout(sidebar)
+
+        # Queue section
+        queue_group = QGroupBox("Queue")
+        queue_layout = QVBoxLayout(queue_group)
+
+        # Queue list widget
+        self.queue_list = QListWidget()
+        self.queue_list.setMinimumHeight(200)
+        self.queue_list.itemClicked.connect(self.on_queue_item_selected)
+        queue_layout.addWidget(self.queue_list)
+
+        # Queue control buttons
+        queue_controls = QHBoxLayout()
+        self.btn_start_all = QPushButton("Start All")
+        self.btn_pause_all = QPushButton("Pause All")
+        self.btn_stop_all = QPushButton("Stop All")
+        self.btn_clear_queue = QPushButton("Clear")
+
+        self.btn_start_all.clicked.connect(self.start_all_processing)
+        self.btn_pause_all.clicked.connect(self.pause_all_processing)
+        self.btn_stop_all.clicked.connect(self.stop_all_processing)
+        self.btn_clear_queue.clicked.connect(self.clear_all_queue)
+
+        queue_controls.addWidget(self.btn_start_all)
+        queue_controls.addWidget(self.btn_pause_all)
+        queue_controls.addWidget(self.btn_stop_all)
+        queue_controls.addWidget(self.btn_clear_queue)
+        queue_layout.addLayout(queue_controls)
+
+        sidebar_layout.addWidget(queue_group)
+
+        # Drop area section
+        drop_group = QGroupBox("Add New Items")
+        drop_layout = QVBoxLayout(drop_group)
+
+        self.drop_area = DropAreaWidget()
+        self.drop_area.files_dropped.connect(self.add_files_to_queue)
+        drop_layout.addWidget(self.drop_area)
+
+        # Start processing button (moved here)
+        self.btn_start_selected = QPushButton("Start Selected")
+        self.btn_start_selected.setFixedHeight(40)
+        self.btn_start_selected.setEnabled(False)
+        self.btn_start_selected.clicked.connect(self.start_selected_processing)
+        drop_layout.addWidget(self.btn_start_selected)
+
+        sidebar_layout.addWidget(drop_group)
+        sidebar_layout.addStretch()
+
+        # Right main content area
+        self.main_content = QWidget()
+        main_content_layout = QVBoxLayout(self.main_content)
+
+        # Content placeholder - will show item details when selected
+        self.content_stack = QVBoxLayout()
+
+        # Default message when nothing is selected
+        self.default_message = QLabel("Select a queue item to view details")
+        self.default_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.default_message.setStyleSheet("color: #666666; font-size: 16px;")
+        main_content_layout.addWidget(self.default_message)
+
+        # Item details area (hidden by default)
+        self.item_details_widget = QWidget()
+        self.item_details_layout = QVBoxLayout(self.item_details_widget)
+        self.item_details_widget.hide()
+        main_content_layout.addWidget(self.item_details_widget)
+
+        # Add to splitter
+        main_splitter.addWidget(sidebar)
+        main_splitter.addWidget(self.main_content)
+        main_splitter.setStretchFactor(0, 0)  # Sidebar fixed width
+        main_splitter.setStretchFactor(1, 1)  # Main content expands
+
+        # Add splitter to processing tab
         layout = QVBoxLayout(self.processing_tab)
-        placeholder_label = QLabel("Processing Tab - Under Construction")
-        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(placeholder_label)
+        layout.addWidget(main_splitter)
+
+        # Initialize queue management
+        self.queue_items = []  # List of QueueItemWidget objects
+        self.selected_queue_item = None
 
     def setup_settings_tab(self):
         """Set up the Settings tab with organized settings groups."""
-        # TODO: Implement settings tab layout
-        layout = QVBoxLayout(self.settings_tab)
-        placeholder_label = QLabel("Settings Tab - Under Construction")
-        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(placeholder_label)
+        # Create scroll area for settings
+        scroll = QScrollArea()
+        scroll_widget = QWidget()
+        main_layout = QVBoxLayout(scroll_widget)
+
+        # Create settings in organized groups
+        self.setup_output_settings(main_layout)
+        self.setup_audio_encoding_settings(main_layout)
+        self.setup_voice_speed_settings(main_layout)
+        self.setup_subtitle_settings(main_layout)
+        self.setup_advanced_settings(main_layout)
+        self.setup_pronunciation_settings(main_layout)
+
+        main_layout.addStretch()
+        scroll.setWidget(scroll_widget)
+        scroll.setWidgetResizable(True)
+
+        # Add to settings tab
+        settings_layout = QVBoxLayout(self.settings_tab)
+        settings_layout.addWidget(scroll)
+
+    def setup_output_settings(self, parent_layout):
+        """Setup output settings group."""
+        group = QGroupBox("Output Settings")
+        layout = QVBoxLayout(group)
+
+        # Save location dropdown
+        save_layout = QHBoxLayout()
+        save_layout.addWidget(QLabel("Save location:"))
+        self.save_combo = QComboBox()
+        self.save_combo.addItems(
+            [
+                "AudioBookshelf structure",
+                "Save next to input file",
+                "Save to Desktop",
+                "Choose output folder",
+            ]
+        )
+
+        # Set saved value
+        try:
+            saved_index = [
+                "AudioBookshelf structure",
+                "Save next to input file",
+                "Save to Desktop",
+                "Choose output folder",
+            ].index(self.save_option)
+            self.save_combo.setCurrentIndex(saved_index)
+        except ValueError:
+            self.save_combo.setCurrentIndex(0)
+
+        self.save_combo.currentIndexChanged.connect(self.on_save_option_changed)
+        save_layout.addWidget(self.save_combo)
+        layout.addLayout(save_layout)
+
+        # Save path display
+        self.save_path_row_widget = QWidget()
+        save_path_layout = QHBoxLayout(self.save_path_row_widget)
+        save_path_layout.setContentsMargins(0, 0, 0, 0)
+        save_path_layout.addWidget(QLabel("Path:"))
+
+        self.save_path_label = QLabel("")
+        self.save_path_label.setStyleSheet(f"QLabel {{ color: {COLORS['GREEN']}; }}")
+        save_path_layout.addWidget(self.save_path_label)
+        layout.addWidget(self.save_path_row_widget)
+
+        # Project folder option
+        self.project_folder_checkbox = QCheckBox("Save in project folder with metadata")
+        layout.addWidget(self.project_folder_checkbox)
+
+        # Initialize save path display
+        if (
+            self.save_option == "AudioBookshelf structure"
+            and self.selected_output_folder
+        ):
+            self.save_path_label.setText(self.selected_output_folder)
+            self.save_path_row_widget.show()
+        else:
+            self.save_path_row_widget.hide()
+
+        parent_layout.addWidget(group)
+
+    def setup_audio_encoding_settings(self, parent_layout):
+        """Setup audio encoding settings group."""
+        group = QGroupBox("Audio Encoding")
+        layout = QVBoxLayout(group)
+
+        # Format selection (3-dropdown system)
+        format_layout = QHBoxLayout()
+
+        # Format dropdown
+        format_layout.addWidget(QLabel("Format:"))
+        self.format_combo = QComboBox()
+        self.format_combo.setStyleSheet(
+            "QComboBox { min-height: 20px; padding: 6px 12px; }"
+        )
+
+        # Encoder dropdown
+        format_layout.addWidget(QLabel("Encoder:"))
+        self.encoder_combo = QComboBox()
+        self.encoder_combo.setStyleSheet(
+            "QComboBox { min-height: 20px; padding: 6px 12px; }"
+        )
+
+        # Bitrate dropdown
+        format_layout.addWidget(QLabel("Bitrate:"))
+        self.bitrate_combo = QComboBox()
+        self.bitrate_combo.setStyleSheet(
+            "QComboBox { min-height: 20px; padding: 6px 12px; }"
+        )
+
+        # Populate and connect
+        for key, config in self.audio_formats.items():
+            self.format_combo.addItem(config["name"], key)
+
+        idx = self.format_combo.findData(self.selected_format)
+        if idx >= 0:
+            self.format_combo.setCurrentIndex(idx)
+
+        self.format_combo.currentIndexChanged.connect(self.on_format_changed)
+        self.encoder_combo.currentIndexChanged.connect(self.on_encoder_changed)
+        self.bitrate_combo.currentIndexChanged.connect(self.on_bitrate_changed)
+
+        format_layout.addWidget(self.format_combo)
+        format_layout.addWidget(self.encoder_combo)
+        format_layout.addWidget(self.bitrate_combo)
+        layout.addLayout(format_layout)
+
+        # Update encoder/bitrate options
+        self.update_encoder_bitrate_options()
+
+        # Separate chapters format
+        chapters_layout = QHBoxLayout()
+        chapters_layout.addWidget(QLabel("Separate chapters format:"))
+        self.separate_chapters_combo = QComboBox()
+        for fmt in ["wav", "flac", "mp3", "aac", "opus"]:
+            self.separate_chapters_combo.addItem(fmt.upper(), fmt)
+
+        # Set saved value
+        current_fmt = getattr(self, "separate_chapters_format", "wav")
+        idx = self.separate_chapters_combo.findData(current_fmt)
+        if idx >= 0:
+            self.separate_chapters_combo.setCurrentIndex(idx)
+
+        self.separate_chapters_combo.currentIndexChanged.connect(
+            lambda i: setattr(
+                self,
+                "separate_chapters_format",
+                self.separate_chapters_combo.currentData(),
+            )
+        )
+        chapters_layout.addWidget(self.separate_chapters_combo)
+        layout.addLayout(chapters_layout)
+
+        parent_layout.addWidget(group)
+
+    def setup_voice_speed_settings(self, parent_layout):
+        """Setup voice and speed settings group."""
+        group = QGroupBox("Voice & Speed")
+        layout = QVBoxLayout(group)
+
+        # Voice selection
+        voice_layout = QHBoxLayout()
+        voice_layout.addWidget(QLabel("Select voice:"))
+
+        self.voice_combo = QComboBox()
+        self.voice_combo.setFixedWidth(150)
+
+        # Populate voice combo
+        for i, voice_data in enumerate(VOICES_INTERNAL):
+            lang_code = voice_data[0]
+            language_name = LANGUAGE_NAMES.get(lang_code, lang_code)
+            is_female = voice_data[1] == "f"
+            gender_icon = "♀" if is_female else "♂"
+            display_name = f"{gender_icon} {language_name}"
+            self.voice_combo.addItem(display_name, voice_data)
+
+        # Set saved voice
+        if hasattr(self, "selected_voice") and self.selected_voice:
+            for i in range(self.voice_combo.count()):
+                if self.voice_combo.itemData(i) == self.selected_voice:
+                    self.voice_combo.setCurrentIndex(i)
+                    break
+        else:
+            # Default to af_heart
+            for i in range(self.voice_combo.count()):
+                if self.voice_combo.itemData(i) == "af_heart":
+                    self.voice_combo.setCurrentIndex(i)
+                    self.selected_voice = "af_heart"
+                    self.selected_lang = "a"
+                    break
+
+        self.voice_combo.currentIndexChanged.connect(self.voice_changed)
+        voice_layout.addWidget(self.voice_combo)
+
+        # Voice mixer button
+        self.btn_voice_formula_mixer = QPushButton("⚙")
+        self.btn_voice_formula_mixer.setFixedSize(30, 30)
+        self.btn_voice_formula_mixer.setToolTip("Open Voice Mixer")
+        self.btn_voice_formula_mixer.clicked.connect(self.open_voice_formula_dialog)
+        voice_layout.addWidget(self.btn_voice_formula_mixer)
+
+        # Voice preview button
+        self.voice_preview_btn = QPushButton("▶")
+        self.voice_preview_btn.setFixedSize(30, 30)
+        self.voice_preview_btn.setToolTip("Preview voice")
+        self.voice_preview_btn.clicked.connect(self.voice_preview)
+        voice_layout.addWidget(self.voice_preview_btn)
+
+        voice_layout.addStretch()
+        layout.addLayout(voice_layout)
+
+        # Speed control
+        speed_layout = QVBoxLayout()
+        speed_layout.addWidget(QLabel("Speed:"))
+
+        speed_control_layout = QHBoxLayout()
+        self.speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self.speed_slider.setRange(1, 20)
+        self.speed_slider.setValue(10)
+        self.speed_slider.setTickInterval(1)
+        self.speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+
+        self.speed_value_label = QLabel("1.0x")
+
+        def update_speed_label(value):
+            speed = value / 10.0
+            self.speed_value_label.setText(f"{speed}x")
+
+        self.speed_slider.valueChanged.connect(update_speed_label)
+
+        speed_control_layout.addWidget(self.speed_slider)
+        speed_control_layout.addWidget(self.speed_value_label)
+        speed_layout.addLayout(speed_control_layout)
+        layout.addLayout(speed_layout)
+
+        parent_layout.addWidget(group)
+
+    def setup_subtitle_settings(self, parent_layout):
+        """Setup subtitle settings group."""
+        group = QGroupBox("Subtitle Settings")
+        layout = QVBoxLayout(group)
+
+        # Subtitle mode
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("Generation mode:"))
+
+        self.subtitle_combo = QComboBox()
+        for option in SUBTITLE_OPTIONS:
+            self.subtitle_combo.addItem(option)
+
+        # Set saved mode
+        saved_subtitle_mode = self.config.get("subtitle_mode", "Sentence")
+        try:
+            saved_index = SUBTITLE_OPTIONS.index(saved_subtitle_mode)
+            self.subtitle_combo.setCurrentIndex(saved_index)
+        except ValueError:
+            self.subtitle_combo.setCurrentIndex(5)  # Default to "Sentence"
+
+        self.subtitle_combo.currentIndexChanged.connect(self.on_subtitle_mode_changed)
+        mode_layout.addWidget(self.subtitle_combo)
+        layout.addLayout(mode_layout)
+
+        # Subtitle format
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Subtitle format:"))
+
+        self.subtitle_format_combo = QComboBox()
+        self.subtitle_format_combo.setStyleSheet(
+            "QComboBox { min-height: 20px; padding: 6px 12px; }"
+        )
+
+        for text, value in SUBTITLE_FORMATS.items():
+            self.subtitle_format_combo.addItem(text, value)
+
+        # Set saved format
+        subtitle_format = self.config.get("subtitle_format", "srt")
+        idx = self.subtitle_format_combo.findData(subtitle_format)
+        if idx >= 0:
+            self.subtitle_format_combo.setCurrentIndex(idx)
+
+        self.subtitle_format_combo.currentIndexChanged.connect(
+            lambda i: self.set_subtitle_format(self.subtitle_format_combo.itemData(i))
+        )
+        format_layout.addWidget(self.subtitle_format_combo)
+        layout.addLayout(format_layout)
+
+        parent_layout.addWidget(group)
+
+    def setup_advanced_settings(self, parent_layout):
+        """Setup advanced settings group."""
+        group = QGroupBox("Advanced Options")
+        layout = QVBoxLayout(group)
+
+        # Replace newlines checkbox
+        self.replace_newlines_combo = QCheckBox("Replace single newlines with spaces")
+        self.replace_newlines_combo.setToolTip(
+            "Replace single newlines with spaces. Useful for text with unwanted line breaks."
+        )
+        self.replace_newlines_combo.setChecked(
+            getattr(self, "replace_single_newlines", False)
+        )
+        self.replace_newlines_combo.stateChanged.connect(
+            self.on_replace_newlines_changed
+        )
+        layout.addWidget(self.replace_newlines_combo)
+
+        # GPU acceleration checkbox
+        self.gpu_checkbox = QCheckBox("Use GPU Acceleration (if available)")
+        self.gpu_checkbox.setToolTip(
+            f"Use GPU acceleration for faster processing\nGPU Available: {'Yes' if self.gpu_ok else 'No'}"
+        )
+        self.gpu_checkbox.setChecked(
+            getattr(self, "gpu_ok", False) and getattr(self, "use_gpu", True)
+        )
+        self.gpu_checkbox.setEnabled(getattr(self, "gpu_ok", False))
+        self.gpu_checkbox.stateChanged.connect(self.on_gpu_changed)
+        layout.addWidget(self.gpu_checkbox)
+
+        # spaCy segmentation
+        self.spacy_checkbox = QCheckBox("Use spaCy for sentence segmentation")
+        self.spacy_checkbox.setChecked(getattr(self, "use_spacy_segmentation", True))
+        layout.addWidget(self.spacy_checkbox)
+
+        # Silent gaps option
+        self.silent_gaps_checkbox = QCheckBox("Use silent gaps between subtitles")
+        self.silent_gaps_checkbox.setChecked(getattr(self, "use_silent_gaps", False))
+        layout.addWidget(self.silent_gaps_checkbox)
+
+        parent_layout.addWidget(group)
+
+    def setup_pronunciation_settings(self, parent_layout):
+        """Setup pronunciation settings as expandable sidebar."""
+        group = QGroupBox("Pronunciation Settings")
+        layout = QVBoxLayout(group)
+
+        # Expandable pronunciation editor
+        pronunciation_layout = QHBoxLayout()
+
+        edit_btn = QPushButton("Edit Pronunciation Config")
+        edit_btn.clicked.connect(self.open_pronunciation_config)
+        edit_btn.setToolTip("Open pronunciation configuration file in system editor")
+        pronunciation_layout.addWidget(edit_btn)
+
+        info_label = QLabel("Customize how TTS handles words, symbols, and text")
+        info_label.setStyleSheet("color: #666666; font-style: italic;")
+        pronunciation_layout.addWidget(info_label)
+
+        layout.addLayout(pronunciation_layout)
+        parent_layout.addWidget(group)
+
+    def add_files_to_queue(self, file_paths):
+        """Add multiple files to the queue."""
+        for file_path in file_paths:
+            if os.path.isfile(file_path):
+                # Create queue item widget
+                queue_item = QueueItemWidget(file_path)
+                self.queue_items.append(queue_item)
+
+                # Add to list widget
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(queue_item.sizeHint())
+                self.queue_list.addItem(list_item)
+                self.queue_list.setItemWidget(list_item, queue_item)
+
+                # Store reference for easy access
+                list_item.queue_item = queue_item
+
+        self.update_queue_controls()
+
+    def on_queue_item_selected(self, list_item):
+        """Handle queue item selection."""
+        self.selected_queue_item = (
+            list_item.queue_item if hasattr(list_item, "queue_item") else None
+        )
+        self.update_item_details()
+        self.update_queue_controls()
+
+    def update_item_details(self):
+        """Update the main content area based on selected item."""
+        if self.selected_queue_item:
+            self.default_message.hide()
+            self.item_details_widget.show()
+            self.setup_item_details(self.selected_queue_item)
+        else:
+            self.default_message.show()
+            self.item_details_widget.hide()
+
+    def setup_item_details(self, queue_item):
+        """Setup detailed view for selected queue item."""
+        # Clear existing layout
+        for i in reversed(range(self.item_details_layout.count())):
+            child = self.item_details_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+
+        # Item info
+        info_label = QLabel(f"File: {os.path.basename(queue_item.file_path)}")
+        info_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.item_details_layout.addWidget(info_label)
+
+        path_label = QLabel(f"Path: {queue_item.file_path}")
+        path_label.setStyleSheet("color: #666666;")
+        self.item_details_layout.addWidget(path_label)
+
+        # Chapter selection placeholder (will be implemented with actual file parsing)
+        chapters_group = QGroupBox("Chapter Selection")
+        chapters_layout = QVBoxLayout(chapters_group)
+        chapters_placeholder = QLabel(
+            "Chapter selection will be implemented when file processing is connected"
+        )
+        chapters_placeholder.setStyleSheet("color: #888888; font-style: italic;")
+        chapters_layout.addWidget(chapters_placeholder)
+        self.item_details_layout.addWidget(chapters_group)
+
+        # Individual controls
+        controls_group = QGroupBox("Item Controls")
+        controls_layout = QHBoxLayout(controls_group)
+
+        start_btn = QPushButton("Start This Item")
+        start_btn.clicked.connect(lambda: self.start_individual_item(queue_item))
+        controls_layout.addWidget(start_btn)
+
+        stop_btn = QPushButton("Stop This Item")
+        stop_btn.clicked.connect(lambda: self.stop_individual_item(queue_item))
+        controls_layout.addWidget(stop_btn)
+
+        remove_btn = QPushButton("Remove from Queue")
+        remove_btn.clicked.connect(lambda: self.remove_queue_item(queue_item))
+        controls_layout.addWidget(remove_btn)
+
+        self.item_details_layout.addWidget(controls_group)
+
+        # Logs area
+        logs_group = QGroupBox("Processing Log")
+        logs_layout = QVBoxLayout(logs_group)
+        log_text = QTextEdit()
+        log_text.setReadOnly(True)
+        log_text.setMaximumHeight(150)
+        log_text.setText("No logs yet...")
+        logs_layout.addWidget(log_text)
+        self.item_details_layout.addWidget(logs_group)
+
+        self.item_details_layout.addStretch()
+
+    def update_queue_controls(self):
+        """Update queue control button states."""
+        has_items = len(self.queue_items) > 0
+        has_selected = self.selected_queue_item is not None
+
+        self.btn_start_all.setEnabled(has_items)
+        self.btn_clear_queue.setEnabled(has_items)
+        self.btn_start_selected.setEnabled(has_selected)
+
+    def start_all_processing(self):
+        """Start processing all queue items."""
+        # TODO: Implement batch processing
+        QMessageBox.information(
+            self, "Start All", "Batch processing will be implemented in Phase 4"
+        )
+
+    def pause_all_processing(self):
+        """Pause all processing."""
+        # TODO: Implement pause functionality
+        QMessageBox.information(
+            self,
+            "Pause All",
+            "Pause functionality will be implemented with multi-threading",
+        )
+
+    def stop_all_processing(self):
+        """Stop all processing."""
+        # TODO: Implement stop functionality
+        QMessageBox.information(
+            self, "Stop All", "Stop functionality will be implemented in Phase 4"
+        )
+
+    def clear_all_queue(self):
+        """Clear all items from queue."""
+        if self.queue_items:
+            reply = QMessageBox.question(
+                self,
+                "Clear Queue",
+                "Are you sure you want to clear all queue items?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.queue_list.clear()
+                self.queue_items.clear()
+                self.selected_queue_item = None
+                self.update_item_details()
+                self.update_queue_controls()
+
+    def start_selected_processing(self):
+        """Start processing selected item."""
+        if self.selected_queue_item:
+            self.start_individual_item(self.selected_queue_item)
+
+    def start_individual_item(self, queue_item):
+        """Start processing individual queue item."""
+        # TODO: Connect to actual conversion system
+        queue_item.set_status("processing", 0)
+        QMessageBox.information(
+            self,
+            "Start Item",
+            f"Starting processing for {os.path.basename(queue_item.file_path)}",
+        )
+
+    def stop_individual_item(self, queue_item):
+        """Stop processing individual queue item."""
+        queue_item.set_status("pending", 0)
+        QMessageBox.information(
+            self,
+            "Stop Item",
+            f"Stopped processing for {os.path.basename(queue_item.file_path)}",
+        )
+
+    def remove_queue_item(self, queue_item):
+        """Remove item from queue."""
+        if queue_item in self.queue_items:
+            # Find and remove from list widget
+            for i in range(self.queue_list.count()):
+                item = self.queue_list.item(i)
+                if hasattr(item, "queue_item") and item.queue_item == queue_item:
+                    self.queue_list.takeItem(i)
+                    break
+
+            # Remove from queue items list
+            self.queue_items.remove(queue_item)
+
+            # Clear selection if this was selected
+            if self.selected_queue_item == queue_item:
+                self.selected_queue_item = None
+                self.update_item_details()
+
+            self.update_queue_controls()
+
+    # Settings event handlers
+    def on_save_option_changed(self, index):
+        """Handle save option change."""
+        options = [
+            "AudioBookshelf structure",
+            "Save next to input file",
+            "Save to Desktop",
+            "Choose output folder",
+        ]
+        if index < len(options):
+            self.save_option = options[index]
+            self.config["save_option"] = self.save_option
+
+            # Update path display
+            if (
+                self.save_option == "AudioBookshelf structure"
+                and self.selected_output_folder
+            ):
+                self.save_path_label.setText(self.selected_output_folder)
+                self.save_path_row_widget.show()
+            elif self.save_option == "Choose output folder":
+                folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
+                if folder:
+                    self.selected_output_folder = folder
+                    self.config["selected_output_folder"] = folder
+                    self.save_path_label.setText(folder)
+                    self.save_path_row_widget.show()
+                else:
+                    self.save_path_row_widget.hide()
+            else:
+                self.save_path_row_widget.hide()
+
+    def on_format_changed(self, index):
+        """Handle format change."""
+        self.selected_format = self.format_combo.currentData()
+        self.config["selected_format"] = self.selected_format
+        self.update_encoder_bitrate_options()
+
+    def on_encoder_changed(self, index):
+        """Handle encoder change."""
+        self.selected_encoder = self.encoder_combo.currentData()
+        self.config["selected_encoder"] = self.selected_encoder
+
+    def on_bitrate_changed(self, index):
+        """Handle bitrate change."""
+        self.selected_bitrate = self.bitrate_combo.currentData()
+        self.config["selected_bitrate"] = self.selected_bitrate
+
+    def voice_changed(self, index):
+        """Handle voice selection change."""
+        voice_data = self.voice_combo.itemData(index)
+        self.selected_voice = voice_data
+        self.selected_lang = voice_data[0] if voice_data else None
+        self.config["selected_voice"] = voice_data
+
+    def on_subtitle_mode_changed(self, index):
+        """Handle subtitle mode change."""
+        if index < len(SUBTITLE_OPTIONS):
+            subtitle_mode = SUBTITLE_OPTIONS[index]
+            self.config["subtitle_mode"] = subtitle_mode
+
+    def set_subtitle_format(self, format_value):
+        """Set subtitle format."""
+        self.config["subtitle_format"] = format_value
+
+    def on_replace_newlines_changed(self, state):
+        """Handle replace newlines checkbox."""
+        self.replace_single_newlines = bool(state)
+        self.config["replace_single_newlines"] = self.replace_single_newlines
+
+    def on_gpu_changed(self, state):
+        """Handle GPU checkbox change."""
+        self.use_gpu = bool(state)
+        self.config["use_gpu"] = self.use_gpu
+
+    def open_voice_formula_dialog(self):
+        """Open voice formula mixer dialog."""
+        # TODO: Connect to existing voice mixer
+        QMessageBox.information(
+            self,
+            "Voice Mixer",
+            "Voice mixer integration will be implemented in Phase 4",
+        )
+
+    def voice_preview(self):
+        """Preview selected voice."""
+        # TODO: Connect to existing voice preview
+        QMessageBox.information(
+            self, "Voice Preview", "Voice preview will be implemented in Phase 4"
+        )
+
+    def populate_profiles_in_voice_combo(self):
+        """Populate voice profiles - compatibility method."""
+        # This method is called by old code, keeping it for compatibility
+        pass
 
     def open_file_dialog(self):
         if self.is_converting:
