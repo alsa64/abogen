@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QCheckBox,
     QMenu,
+    QTabWidget,
 )
 from PyQt6.QtGui import QAction, QActionGroup
 from PyQt6.QtCore import (
@@ -1031,456 +1032,64 @@ class abogen(QWidget):
     def initUI(self):
         self.setWindowTitle(f"{PROGRAM_NAME} v{VERSION}")
         screen = QApplication.primaryScreen().geometry()
-        width, height = 500, 800
+        width, height = 700, 800  # Slightly wider for tabbed interface
         x = (screen.width() - width) // 2
         # If desired height is larger than screen, fit to screen height
         if height > screen.height() - 65:
             height = screen.height() - 100  # Leave a margin for window borders
         y = max((screen.height() - height) // 2, 0)
         self.setGeometry(x, y, width, height)
-        outer_layout = QVBoxLayout()
-        outer_layout.setContentsMargins(15, 15, 15, 15)
-        container = QWidget(self)
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(15)
-        self.input_box = InputBox(self)
-        container_layout.addWidget(self.input_box, 1)
-        # Manage queue button, start queue button
-        self.queue_row_widget = QWidget(self)  # Make queue_row a QWidget
-        queue_row = QHBoxLayout(self.queue_row_widget)
-        queue_row.setContentsMargins(0, 0, 0, 0)
-        self.btn_add_to_queue = QPushButton("Add to Queue", self)
-        self.btn_add_to_queue.setFixedHeight(40)
-        self.btn_add_to_queue.setEnabled(False)
-        self.btn_add_to_queue.clicked.connect(self.add_to_queue)
-        queue_row.addWidget(self.btn_add_to_queue)
-        self.btn_manage_queue = QPushButton("Manage Queue", self)
-        self.btn_manage_queue.setFixedHeight(40)
-        self.btn_manage_queue.setEnabled(True)
-        self.btn_manage_queue.clicked.connect(self.manage_queue)
-        queue_row.addWidget(self.btn_manage_queue)
-        self.btn_clear_queue = QPushButton("Clear Queue", self)
-        self.btn_clear_queue.setFixedHeight(40)
-        self.btn_clear_queue.setEnabled(False)
-        self.btn_clear_queue.clicked.connect(self.clear_queue)
-        queue_row.addWidget(self.btn_clear_queue)
-        container_layout.addWidget(self.queue_row_widget)
-        self.log_text = QTextEdit(self)
-        self.log_text.setReadOnly(True)
-        self.log_text.setUndoRedoEnabled(False)
-        self.log_text.setFrameStyle(QFrame.Shape.NoFrame)
-        self.log_text.setStyleSheet("QTextEdit { border: none; }")
-        self.log_text.hide()
-        container_layout.addWidget(self.log_text, 1)
-        controls_layout = QVBoxLayout()
-        controls_layout.setContentsMargins(0, 10, 0, 0)
-        controls_layout.setSpacing(15)
-        # Speed controls
-        speed_layout = QVBoxLayout()
-        speed_layout.setSpacing(2)
-        speed_layout.addWidget(QLabel("Speed:", self))
-        self.speed_slider = QSlider(Qt.Orientation.Horizontal, self)
-        self.speed_slider.setMinimum(10)
-        self.speed_slider.setMaximum(200)
-        self.speed_slider.setValue(100)
-        self.speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.speed_slider.setTickInterval(5)
-        self.speed_slider.setSingleStep(5)
-        speed_layout.addWidget(self.speed_slider)
-        self.speed_label = QLabel("1.0", self)
-        speed_layout.addWidget(self.speed_label)
-        controls_layout.addLayout(speed_layout)
-        self.speed_slider.valueChanged.connect(self.update_speed_label)
-        # Voice selection
-        voice_layout = QHBoxLayout()
-        voice_layout.setSpacing(7)
-        voice_label = QLabel("Select voice:", self)
-        voice_layout.addWidget(voice_label)
-        self.voice_combo = QComboBox(self)
-        self.voice_combo.currentIndexChanged.connect(self.on_voice_combo_changed)
-        self.voice_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
-        self.voice_combo.setToolTip(
-            "The first character represents the language:\n"
-            '"a" => American English\n"b" => British English\n"e" => Spanish\n"f" => French\n"h" => Hindi\n"i" => Italian\n"j" => Japanese\n"p" => Brazilian Portuguese\n"z" => Mandarin Chinese\nThe second character represents the gender:\n"m" => Male\n"f" => Female'
-        )
-        self.voice_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        voice_layout.addWidget(self.voice_combo)
-        # Voice formula button
-        self.btn_voice_formula_mixer = QPushButton(self)
-        mixer_icon_path = get_resource_path("abogen.assets", "voice_mixer.png")
-        self.btn_voice_formula_mixer.setIcon(QIcon(mixer_icon_path))
-        self.btn_voice_formula_mixer.setToolTip("Mix and match voices")
-        self.btn_voice_formula_mixer.setFixedSize(40, 36)
-        self.btn_voice_formula_mixer.setStyleSheet("QPushButton { padding: 6px 12px; }")
-        self.btn_voice_formula_mixer.clicked.connect(self.show_voice_formula_dialog)
-        voice_layout.addWidget(self.btn_voice_formula_mixer)
 
-        # Play/Stop icons
-        def make_icon(color, shape):
-            pix = QPixmap(20, 20)
-            pix.fill(Qt.GlobalColor.transparent)
-            p = QPainter(pix)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            p.setBrush(QColor(*color))
-            p.setPen(Qt.PenStyle.NoPen)
-            if shape == "play":
-                pts = [
-                    pix.rect().topLeft() + QPoint(4, 2),
-                    pix.rect().bottomLeft() + QPoint(4, -2),
-                    pix.rect().center() + QPoint(6, 0),
-                ]
-                p.drawPolygon(QPolygon(pts))
-            else:
-                p.drawRect(5, 5, 10, 10)
-            p.end()
-            return QIcon(pix)
+        # Create main layout with tab widget
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
 
-        self.play_icon = make_icon((40, 160, 40), "play")
-        self.stop_icon = make_icon((200, 60, 60), "stop")
-        self.btn_preview = QPushButton(self)
-        self.btn_preview.setIcon(self.play_icon)
-        self.btn_preview.setIconSize(QPixmap(20, 20).size())
-        self.btn_preview.setToolTip("Preview selected voice")
-        self.btn_preview.setFixedSize(40, 36)
-        self.btn_preview.setStyleSheet("QPushButton { padding: 6px 12px; }")
-        self.btn_preview.clicked.connect(self.preview_voice)
-        voice_layout.addWidget(self.btn_preview)
-        self.preview_playing = False
-        self.play_audio_thread = None  # Keep track of audio playing thread
-        controls_layout.addLayout(voice_layout)
+        # Create tab widget
+        self.tab_widget = QTabWidget(self)
 
-        # Generate subtitles
-        subtitle_layout = QHBoxLayout()
-        subtitle_layout.setSpacing(7)
-        subtitle_label = QLabel("Generate subtitles:", self)
-        subtitle_layout.addWidget(subtitle_label)
-        self.subtitle_combo = QComboBox(self)
-        self.subtitle_combo.setToolTip(
-            "Choose how subtitles will be generated:\n"
-            "Disabled: No subtitles will be generated.\n"
-            "Line: Subtitles will be generated for each line.\n"
-            "Sentence: Subtitles will be generated for each sentence.\n"
-            "Sentence + Comma: Subtitles will be generated for each sentence and comma.\n"
-            "Sentence + Highlighting: Subtitles with word-by-word karaoke highlighting.\n"
-            "1+ word: Subtitles will be generated for each word(s).\n\n"
-            "Supported languages for subtitle generation:\n"
-            + "\n".join(
-                f'"{lang}" => {LANGUAGE_DESCRIPTIONS.get(lang, lang)}'
-                for lang in SUPPORTED_LANGUAGES_FOR_SUBTITLE_GENERATION
-            )
-        )
-        subtitle_options = [
-            "Disabled",
-            "Line",
-            "Sentence",
-            "Sentence + Comma",
-            "Sentence + Highlighting",
-        ] + [f"{i} word" if i == 1 else f"{i} words" for i in range(1, 11)]
-        self.subtitle_combo.addItems(subtitle_options)
-        self.subtitle_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
-        self.subtitle_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        self.subtitle_combo.setCurrentText(self.subtitle_mode)
-        self.subtitle_combo.currentTextChanged.connect(self.on_subtitle_mode_changed)
-        subtitle_layout.addWidget(self.subtitle_combo)
-        controls_layout.addLayout(subtitle_layout)
+        # Create Processing tab
+        self.processing_tab = QWidget()
+        self.tab_widget.addTab(self.processing_tab, "Processing")
 
-        # Advanced audio format selection
-        format_layout = QHBoxLayout()
-        format_layout.setSpacing(7)
+        # Create Settings tab
+        self.settings_tab = QWidget()
+        self.tab_widget.addTab(self.settings_tab, "Settings")
 
-        # Format dropdown
-        format_label = QLabel("Format:", self)
-        format_layout.addWidget(format_label)
-        self.format_combo = QComboBox(self)
-        self.format_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
-        self.format_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        # Add tab widget to main layout
+        main_layout.addWidget(self.tab_widget)
 
-        # Encoder dropdown
-        encoder_label = QLabel("Encoder:", self)
-        format_layout.addWidget(encoder_label)
-        self.encoder_combo = QComboBox(self)
-        self.encoder_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
-        self.encoder_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        # Set up tab contents
+        self.setup_processing_tab()
+        self.setup_settings_tab()
 
-        # Bitrate dropdown
-        bitrate_label = QLabel("Bitrate:", self)
-        format_layout.addWidget(bitrate_label)
-        self.bitrate_combo = QComboBox(self)
-        self.bitrate_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
-        self.bitrate_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        # Set main layout
+        self.setLayout(main_layout)
 
-        # Populate format dropdown
-        for key, config in self.audio_formats.items():
-            self.format_combo.addItem(config["name"], key)
-
-        # Initialize selection
-        idx = self.format_combo.findData(self.selected_format)
-        if idx >= 0:
-            self.format_combo.setCurrentIndex(idx)
-
-        # Connect signals
-        self.format_combo.currentIndexChanged.connect(self.on_format_changed)
-        self.encoder_combo.currentIndexChanged.connect(self.on_encoder_changed)
-        self.bitrate_combo.currentIndexChanged.connect(self.on_bitrate_changed)
-
-        # Add to layout
-        format_layout.addWidget(self.format_combo)
-        format_layout.addWidget(self.encoder_combo)
-        format_layout.addWidget(self.bitrate_combo)
-
-        # Initialize encoder and bitrate dropdowns
-        self.update_encoder_bitrate_options()
-
-        controls_layout.addLayout(format_layout)
-
-        # Output subtitle format
-        subtitle_format_layout = QHBoxLayout()
-        subtitle_format_layout.setSpacing(7)
-        subtitle_format_label = QLabel("Output subtitle format:", self)
-        subtitle_format_layout.addWidget(subtitle_format_label)
-        self.subtitle_format_combo = QComboBox(self)
-        self.subtitle_format_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
-        self.subtitle_format_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        for value, text in SUBTITLE_FORMATS:
-            self.subtitle_format_combo.addItem(text, value)
-        subtitle_format = self.config.get("subtitle_format", "ass_centered_narrow")
-        idx = self.subtitle_format_combo.findData(subtitle_format)
-        if idx >= 0:
-            self.subtitle_format_combo.setCurrentIndex(idx)
-        self.subtitle_format_combo.currentIndexChanged.connect(
-            lambda i: self.set_subtitle_format(self.subtitle_format_combo.itemData(i))
-        )
-        subtitle_format_layout.addWidget(self.subtitle_format_combo)
-        # If subtitle mode requires highlighting, SRT is not supported. Disable SRT item
-        # and auto-switch to a compatible ASS format if SRT is currently selected.
-        try:
-            if (
-                hasattr(self, "subtitle_mode")
-                and self.subtitle_mode == "Sentence + Highlighting"
-            ):
-                idx_srt = self.subtitle_format_combo.findData("srt")
-                if idx_srt >= 0:
-                    item = self.subtitle_format_combo.model().item(idx_srt)
-                    if item is not None:
-                        item.setEnabled(False)
-                # If current selection is SRT, switch to centered narrow ASS
-                if self.subtitle_format_combo.currentData() == "srt":
-                    new_idx = self.subtitle_format_combo.findData("ass_centered_narrow")
-                    if new_idx >= 0:
-                        self.subtitle_format_combo.setCurrentIndex(new_idx)
-                        # Persist the change
-                        self.set_subtitle_format(
-                            self.subtitle_format_combo.itemData(new_idx)
-                        )
-        except Exception:
-            # Fail-safe: don't crash UI if model manipulation isn't supported on some platforms
-            pass
-
-        # Enable/disable subtitle options based on selected language (profile or voice)
-        self.update_subtitle_options_availability()
-
-        controls_layout.addLayout(subtitle_format_layout)
-
-        # Replace single newlines dropdown (acts like checkbox)
-        replace_newlines_layout = QHBoxLayout()
-        replace_newlines_layout.setSpacing(7)
-        replace_newlines_label = QLabel("Replace single newlines:", self)
-        replace_newlines_layout.addWidget(replace_newlines_label)
-        self.replace_newlines_combo = QComboBox(self)
-        self.replace_newlines_combo.addItems(["Disabled", "Enabled"])
-        self.replace_newlines_combo.setToolTip(
-            "Replace single newlines in the input text with spaces before processing."
-        )
-        self.replace_newlines_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
-        self.replace_newlines_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        # Set initial value based on config
-        self.replace_newlines_combo.setCurrentIndex(
-            1 if self.replace_single_newlines else 0
-        )
-        self.replace_newlines_combo.currentIndexChanged.connect(
-            lambda idx: self.toggle_replace_single_newlines(idx == 1)
-        )
-        replace_newlines_layout.addWidget(self.replace_newlines_combo)
-        controls_layout.addLayout(replace_newlines_layout)
-
-        # Save location
-        save_layout = QHBoxLayout()
-        save_layout.setSpacing(7)
-        save_label = QLabel("Save location:", self)
-        save_layout.addWidget(save_label)
-        self.save_combo = QComboBox(self)
-        save_options = [
-            "AudioBookshelf structure",
-            "Save next to input file",
-            "Save to Desktop",
-            "Choose output folder",
-        ]
-        self.save_combo.addItems(save_options)
-        self.save_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
-        self.save_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        self.save_combo.setCurrentText(self.save_option)
-        self.save_combo.currentTextChanged.connect(self.on_save_option_changed)
-        save_layout.addWidget(self.save_combo)
-        controls_layout.addLayout(save_layout)
-
-        # Save path label
-        self.save_path_row_widget = QWidget(self)
-        save_path_row = QHBoxLayout(self.save_path_row_widget)
-        save_path_row.setSpacing(7)
-        save_path_row.setContentsMargins(0, 0, 0, 0)
-        selected_folder_label = QLabel("Selected folder:", self.save_path_row_widget)
-        save_path_row.addWidget(selected_folder_label)
-        self.save_path_label = QLabel("", self.save_path_row_widget)
-        self.save_path_label.setStyleSheet(f"QLabel {{ color: {COLORS['GREEN']}; }}")
-        self.save_path_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-        save_path_row.addWidget(self.save_path_label)
-        self.save_path_row_widget.hide()  # Hide the whole row by default
-        controls_layout.addWidget(self.save_path_row_widget)
-
-        # Initialize save path display for AudioBookshelf structure
-        if (
-            self.save_option == "AudioBookshelf structure"
-            and self.selected_output_folder
-        ):
-            self.save_path_label.setText(self.selected_output_folder)
-            self.save_path_row_widget.show()
-            # Create the directory if it doesn't exist
-            os.makedirs(self.selected_output_folder, exist_ok=True)
-
-        # GPU Acceleration Checkbox with Settings button
-        gpu_layout = QHBoxLayout()
-        gpu_checkbox_layout = QVBoxLayout()
-        self.gpu_checkbox = QCheckBox("Use GPU Acceleration (if available)", self)
-        self.gpu_checkbox.setChecked(self.use_gpu)
-        self.gpu_checkbox.setToolTip(
-            "Uncheck to force using CPU even if a compatible GPU is detected."
-        )
-        self.gpu_checkbox.stateChanged.connect(self.on_gpu_setting_changed)
-        gpu_checkbox_layout.addWidget(self.gpu_checkbox)
-        gpu_layout.addLayout(gpu_checkbox_layout)
-
-        # Set initial enabled state for subtitle format combo
-        if self.subtitle_mode == "Disabled":
-            self.subtitle_format_combo.setEnabled(False)
-        else:
-            self.subtitle_format_combo.setEnabled(True)
-
-        # Settings button with icon
-        settings_icon_path = get_resource_path("abogen.assets", "settings.svg")
-        self.settings_btn = QPushButton(self)
-        if settings_icon_path and os.path.exists(settings_icon_path):
-            self.settings_btn.setIcon(QIcon(settings_icon_path))
-        else:
-            # Fallback text if icon not found
-            self.settings_btn.setText("⚙")
-        self.settings_btn.setToolTip("Settings")
-        self.settings_btn.setFixedSize(36, 36)
-        self.settings_btn.clicked.connect(self.show_settings_menu)
-        gpu_layout.addWidget(self.settings_btn)
-
-        controls_layout.addLayout(gpu_layout)
-
-        # Start button
-        self.btn_start = QPushButton("Start", self)
-        self.btn_start.setFixedHeight(60)
-        self.btn_start.clicked.connect(self.start_conversion)
-        controls_layout.addWidget(self.btn_start)
-        # Add controls to a container widget
-        self.controls_widget = QWidget()
-        self.controls_widget.setLayout(controls_layout)
-        self.controls_widget.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
-        )
-        container_layout.addWidget(self.controls_widget)
-        # Progress bar
-        self.progress_bar = QProgressBar(self)
-        self.progress_bar.setValue(0)
-        self.progress_bar.hide()
-        container_layout.addWidget(self.progress_bar)
-        # ETR Label
-        self.etr_label = QLabel("Estimated time remaining: Calculating...", self)
-        self.etr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.etr_label.hide()
-        container_layout.addWidget(self.etr_label)
-        # Cancel button
-        self.btn_cancel = QPushButton("Cancel", self)
-        self.btn_cancel.setFixedHeight(60)
-        self.btn_cancel.clicked.connect(self.cancel_conversion)
-        self.btn_cancel.hide()
-        container_layout.addWidget(self.btn_cancel)
-        # Finish buttons
-        self.finish_widget = QWidget()
-        finish_layout = QVBoxLayout()
-        finish_layout.setContentsMargins(0, 0, 0, 0)
-        finish_layout.setSpacing(10)
-        self.open_file_btn = None  # Store reference to open file button
-
-        # Create buttons with their functions
-        finish_buttons = [
-            ("Open file", self.open_file, "Open the output file."),
-            (
-                "Go to folder",
-                self.go_to_file,
-                "Open the folder containing the output file.",
-            ),
-            ("New Conversion", self.reset_ui, "Start a new conversion."),
-            ("Go back", self.go_back_ui, "Return to the previous screen."),
-        ]
-
-        for text, func, tip in finish_buttons:
-            btn = QPushButton(text, self)
-            btn.setFixedHeight(35)
-            btn.setToolTip(tip)
-            btn.clicked.connect(func)
-            finish_layout.addWidget(btn)
-            # Identify the Open file button by its function reference
-            if func == self.open_file:
-                self.open_file_btn = btn  # Save reference to the open file button
-
-        self.finish_widget.setLayout(finish_layout)
-        self.finish_widget.hide()
-        container_layout.addWidget(self.finish_widget)
-        outer_layout.addWidget(container)
-        self.setLayout(outer_layout)
-        self.populate_profiles_in_voice_combo()
+        # Temporarily preserve some essential attributes that other methods expect
+        # TODO: These will be moved to appropriate tabs in later phases
+        self.audio_formats = get_audio_format_config()
+        self.selected_format = self.config.get("selected_format", "aac")
+        self.selected_encoder = None
+        self.selected_bitrate = None
 
         # Initialize flag to track if input box was cleared by queue
         self.input_box_cleared_by_queue = False
+
+    def setup_processing_tab(self):
+        """Set up the Processing tab with queue and processing controls."""
+        # TODO: Implement processing tab layout
+        layout = QVBoxLayout(self.processing_tab)
+        placeholder_label = QLabel("Processing Tab - Under Construction")
+        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(placeholder_label)
+
+    def setup_settings_tab(self):
+        """Set up the Settings tab with organized settings groups."""
+        # TODO: Implement settings tab layout
+        layout = QVBoxLayout(self.settings_tab)
+        placeholder_label = QLabel("Settings Tab - Under Construction")
+        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(placeholder_label)
 
     def open_file_dialog(self):
         if self.is_converting:
