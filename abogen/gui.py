@@ -902,8 +902,8 @@ class abogen(QWidget):
 
         # Set default AudioBookshelf directory
         default_audiobooks_dir = os.path.expanduser("~/Books/AudioBooks")
-        self.selected_output_folder = self.config.get(
-            "selected_output_folder", default_audiobooks_dir
+        self.selected_output_folder = os.path.expanduser(
+            self.config.get("selected_output_folder", default_audiobooks_dir)
         )
         self.selected_file = self.selected_file_type = self.selected_book_path = None
         self.displayed_file_path = (
