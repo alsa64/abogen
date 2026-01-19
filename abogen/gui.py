@@ -1696,6 +1696,10 @@ class abogen(QWidget):
             if os.path.isfile(file_path):
                 # Create queue item widget
                 queue_item = QueueItemWidget(file_path)
+
+                # Capture current settings for this item
+                queue_item.individual_settings = self.capture_current_settings()
+
                 self.queue_items.append(queue_item)
 
                 # Add to list widget
@@ -1830,7 +1834,21 @@ class abogen(QWidget):
                 self.queue_items.clear()
                 self.selected_queue_item = None
                 self.update_item_details()
-                self.update_queue_controls()
+        self.update_queue_controls()
+
+    def capture_current_settings(self):
+        """Capture current UI settings for queue item."""
+        return {
+            "speed": self.speed_slider.value() / 100.0,
+            "voice_formula": self.get_voice_formula(),
+            "selected_lang": self.get_selected_lang(self.get_voice_formula()),
+            "subtitle_mode": self.get_actual_subtitle_mode(),
+            "output_format": self.get_output_format_for_conversion(),
+            "save_option": self.save_option,
+            "selected_output_folder": self.selected_output_folder,
+            "save_as_project": getattr(self, "save_as_project", False),
+            "gpu_ok": self.gpu_ok,
+        }
 
     def start_selected_processing(self):
         """Start processing selected item."""
@@ -1839,22 +1857,176 @@ class abogen(QWidget):
 
     def start_individual_item(self, queue_item):
         """Start processing individual queue item."""
-        # TODO: Connect to actual conversion system
-        queue_item.set_status("processing", 0)
-        QMessageBox.information(
-            self,
-            "Start Item",
-            f"Starting processing for {os.path.basename(queue_item.file_path)}",
-        )
+        if self.is_converting:
+            QMessageBox.warning(
+                self,
+                "Already Processing",
+                "Another conversion is already in progress. Please wait for it to complete.",
+            )
+            return
+
+        # Store current queue item for progress tracking
+        self.current_queue_item = queue_item
+
+        # Set up temporary file and settings for this item
+        original_selected_file = self.selected_file
+        original_displayed_file_path = self.displayed_file_path
+        original_char_count = self.char_count
+
+        try:
+            # Apply item-specific settings
+            self.selected_file = queue_item.file_path
+            self.displayed_file_path = queue_item.file_path
+
+            # Calculate character count for progress tracking
+            try:
+                with open(queue_item.file_path, "r", encoding="utf-8") as f:
+                    self.char_count = len(f.read())
+            except Exception:
+                self.char_count = 1000  # Default fallback
+
+            # Update UI state
+            queue_item.set_status("processing", 0)
+
+            # Start conversion process similar to start_conversion but for individual items
+            prevent_sleep_start()
+            self.is_converting = True
+            self.start_time = time.time()
+
+            # Get settings from queue item's saved settings
+            settings = queue_item.individual_settings
+            speed = settings.get("speed", self.speed_slider.value() / 100.0)
+            voice_formula = settings.get("voice_formula", self.get_voice_formula())
+            selected_lang = settings.get(
+                "selected_lang", self.get_selected_lang(voice_formula)
+            )
+            actual_subtitle_mode = settings.get(
+                "subtitle_mode", self.get_actual_subtitle_mode()
+            )
+            output_format = settings.get(
+                "output_format", self.get_output_format_for_conversion()
+            )
+            save_option = settings.get("save_option", self.save_option)
+            selected_output_folder = settings.get(
+                "selected_output_folder", self.selected_output_folder
+            )
+            save_as_project = settings.get(
+                "save_as_project", getattr(self, "save_as_project", False)
+            )
+            use_gpu = settings.get("gpu_ok", self.gpu_ok)
+
+            # Load pipeline and start conversion
+            def pipeline_loaded_callback(np_module, kpipeline_class, error):
+                if error:
+                    queue_item.set_status("failed", 0)
+                    self.is_converting = False
+                    prevent_sleep_end()
+                    QMessageBox.critical(
+                        self,
+                        "Error",
+                        f"Error loading numpy or KPipeline: {error}",
+                    )
+                    return
+
+                # Create conversion thread for this queue item
+                self.conversion_thread = ConversionThread(
+                    queue_item.file_path,
+                    selected_lang,
+                    speed,
+                    voice_formula,
+                    save_option,
+                    selected_output_folder,
+                    subtitle_mode=actual_subtitle_mode,
+                    output_format=output_format,
+                    np_module=np_module,
+                    kpipeline_class=kpipeline_class,
+                    start_time=self.start_time,
+                    total_char_count=self.char_count,
+                    use_gpu=use_gpu,
+                    from_queue=True,
+                    save_base_path=queue_item.file_path,
+                    save_as_project=save_as_project,
+                )
+
+                # Connect signals for queue item progress tracking
+                self.conversion_thread.progress_updated.connect(
+                    lambda progress, etr: self.update_queue_item_progress(
+                        queue_item, progress, etr
+                    )
+                )
+                self.conversion_thread.conversion_finished.connect(
+                    lambda output, output_path: self.handle_queue_item_finished(
+                        queue_item, output, output_path
+                    )
+                )
+                self.conversion_thread.log_updated.connect(self.update_log)
+
+                # Start the thread
+                self.conversion_thread.start()
+
+            # Load pipeline asynchronously
+            self.load_pipeline_async(pipeline_loaded_callback)
+
+        except Exception as e:
+            # Restore original state on error
+            self.selected_file = original_selected_file
+            self.displayed_file_path = original_displayed_file_path
+            self.char_count = original_char_count
+            queue_item.set_status("failed", 0)
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to start processing: {str(e)}",
+            )
 
     def stop_individual_item(self, queue_item):
         """Stop processing individual queue item."""
-        queue_item.set_status("pending", 0)
-        QMessageBox.information(
-            self,
-            "Stop Item",
-            f"Stopped processing for {os.path.basename(queue_item.file_path)}",
-        )
+        if (
+            hasattr(self, "conversion_thread")
+            and self.conversion_thread
+            and self.conversion_thread.isRunning()
+        ):
+            # Check if this is the currently processing item
+            if (
+                hasattr(self, "current_queue_item")
+                and self.current_queue_item == queue_item
+            ):
+                # Stop the conversion thread
+                self.conversion_thread.should_cancel = True
+                self.conversion_thread.cancel_requested = True
+
+                # Wait for thread to finish
+                self.conversion_thread.wait()
+
+                # Reset state
+                self.is_converting = False
+                self.current_queue_item = None
+                prevent_sleep_end()
+
+                queue_item.set_status("pending", 0)
+            else:
+                QMessageBox.information(
+                    self,
+                    "Cannot Stop",
+                    f"Item {os.path.basename(queue_item.file_path)} is not currently being processed.",
+                )
+        else:
+            queue_item.set_status("pending", 0)
+
+    def update_queue_item_progress(self, queue_item, progress, etr):
+        """Update progress for a specific queue item."""
+        queue_item.set_status("processing", progress)
+
+    def handle_queue_item_finished(self, queue_item, output, output_path):
+        """Handle completion of queue item processing."""
+        self.is_converting = False
+        self.current_queue_item = None
+        prevent_sleep_end()
+
+        if output:
+            queue_item.set_status("completed", 100)
+        else:
+            queue_item.set_status("failed", 0)
 
     def remove_queue_item(self, queue_item):
         """Remove item from queue."""
