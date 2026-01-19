@@ -1692,8 +1692,23 @@ class abogen(QWidget):
 
     def add_files_to_queue(self, file_paths):
         """Add multiple files to the queue."""
+        supported_extensions = {".txt", ".epub", ".pdf", ".md", ".srt", ".ass", ".vtt"}
+        added_count = 0
+        skipped_files = []
+
         for file_path in file_paths:
             if os.path.isfile(file_path):
+                # Check file extension
+                file_ext = os.path.splitext(file_path)[1].lower()
+                if file_ext not in supported_extensions:
+                    skipped_files.append(os.path.basename(file_path))
+                    continue
+
+                # Check if file already exists in queue
+                if any(item.file_path == file_path for item in self.queue_items):
+                    # Allow duplicates but could show a warning if desired
+                    pass
+
                 # Create queue item widget
                 queue_item = QueueItemWidget(file_path)
 
@@ -1710,8 +1725,26 @@ class abogen(QWidget):
 
                 # Store reference for easy access
                 list_item.queue_item = queue_item
+                added_count += 1
 
         self.update_queue_controls()
+
+        # Provide user feedback
+        if added_count > 0:
+            status_msg = f"Added {added_count} file(s) to queue"
+            if hasattr(self, "status_bar"):
+                self.status_bar.showMessage(status_msg, 3000)  # Show for 3 seconds
+
+        if skipped_files:
+            skipped_list = ", ".join(skipped_files[:5])  # Show first 5
+            if len(skipped_files) > 5:
+                skipped_list += f" and {len(skipped_files) - 5} more"
+            QMessageBox.warning(
+                self,
+                "Unsupported Files",
+                f"Skipped unsupported file(s): {skipped_list}\n\n"
+                f"Supported formats: {', '.join(sorted(supported_extensions))}",
+            )
 
     def on_queue_item_selected(self, list_item):
         """Handle queue item selection."""
@@ -1799,10 +1832,45 @@ class abogen(QWidget):
 
     def start_all_processing(self):
         """Start processing all queue items."""
-        # TODO: Implement batch processing
-        QMessageBox.information(
-            self, "Start All", "Batch processing will be implemented in Phase 4"
-        )
+        if not self.queue_items:
+            QMessageBox.information(self, "Start All", "No items in queue to process.")
+            return
+
+        if self.is_converting:
+            QMessageBox.warning(
+                self,
+                "Processing In Progress",
+                "Another conversion is already running. Please wait for it to complete.",
+            )
+            return
+
+        # Enable auto-progression through queue
+        self._auto_process_queue = True
+
+        # Find first pending item and start it
+        for item in self.queue_items:
+            if item.status == "pending":
+                self.start_individual_item(item)
+                break
+        else:
+            QMessageBox.information(
+                self,
+                "Start All",
+                "No pending items found in queue. All items are either completed or failed.",
+            )
+            return
+
+        # Find first pending item and start it
+        for item in self.queue_items:
+            if item.status == "pending":
+                self.start_individual_item(item)
+                break
+        else:
+            QMessageBox.information(
+                self,
+                "Start All",
+                "No pending items found in queue. All items are either completed or failed.",
+            )
 
     def pause_all_processing(self):
         """Pause all processing."""
@@ -1815,10 +1883,24 @@ class abogen(QWidget):
 
     def stop_all_processing(self):
         """Stop all processing."""
-        # TODO: Implement stop functionality
-        QMessageBox.information(
-            self, "Stop All", "Stop functionality will be implemented in Phase 4"
-        )
+        if not self.is_converting:
+            QMessageBox.information(
+                self, "Stop All", "No processing currently running."
+            )
+            return
+
+        # Disable auto-progression
+        self._auto_process_queue = False
+
+        # Find currently processing item and stop it
+        if hasattr(self, "current_queue_item") and self.current_queue_item:
+            self.stop_individual_item(self.current_queue_item)
+        else:
+            # Fallback: stop any processing items
+            for item in self.queue_items:
+                if item.status == "processing":
+                    self.stop_individual_item(item)
+                    break
 
     def clear_all_queue(self):
         """Clear all items from queue."""
@@ -2027,6 +2109,22 @@ class abogen(QWidget):
             queue_item.set_status("completed", 100)
         else:
             queue_item.set_status("failed", 0)
+
+        # Auto-start next pending item if this was started via "Start All"
+        if hasattr(self, "_auto_process_queue") and self._auto_process_queue:
+            self.start_next_pending_item()
+
+    def start_next_pending_item(self):
+        """Start the next pending item in the queue."""
+        for item in self.queue_items:
+            if item.status == "pending":
+                self.start_individual_item(item)
+                return True
+
+        # No more pending items, disable auto-processing
+        if hasattr(self, "_auto_process_queue"):
+            self._auto_process_queue = False
+        return False
 
     def remove_queue_item(self, queue_item):
         """Remove item from queue."""
