@@ -3513,7 +3513,7 @@ class abogen(QWidget):
         format_group = QActionGroup(self)
         format_group.setExclusive(True)
 
-        for format_option in ["wav", "flac", "mp3", "opus"]:
+        for format_option in ["wav", "flac", "mp3", "aac", "opus"]:
             format_action = QAction(format_option, self)
             format_action.setCheckable(True)
             format_action.setChecked(self.separate_chapters_format == format_option)

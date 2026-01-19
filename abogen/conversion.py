@@ -911,9 +911,15 @@ class ConversionThread(QThread):
                         chapters_out_dir, chapter_idx, total_chapters
                     )
 
+                    # Determine file extension for chapter files
+                    if separate_chapters_format == "aac":
+                        chapter_extension = "m4a"  # AAC chapters use M4A container
+                    else:
+                        chapter_extension = separate_chapters_format
+
                     chapter_out_path = os.path.join(
                         actual_chapters_dir,
-                        f"{chapter_filename}.{separate_chapters_format}",
+                        f"{chapter_filename}.{chapter_extension}",
                     )
                     if separate_chapters_format in ["wav", "mp3", "flac"]:
                         chapter_out_file = sf.SoundFile(
@@ -941,6 +947,28 @@ class ConversionThread(QThread):
                             "pipe:0",
                         ]
                         cmd.extend(["-c:a", "libopus", "-b:a", "24000"])
+                        cmd.append(chapter_out_path)
+                        chapter_ffmpeg_proc = create_process(
+                            cmd, stdin=subprocess.PIPE, text=False
+                        )
+                        chapter_out_file = None
+                    elif separate_chapters_format == "aac":
+                        static_ffmpeg.add_paths()
+                        cmd = [
+                            "ffmpeg",
+                            "-y",
+                            "-thread_queue_size",
+                            "32768",
+                            "-f",
+                            "f32le",
+                            "-ar",
+                            "24000",
+                            "-ac",
+                            "1",
+                            "-i",
+                            "pipe:0",
+                        ]
+                        cmd.extend(["-c:a", "aac", "-b:a", "160k"])
                         cmd.append(chapter_out_path)
                         chapter_ffmpeg_proc = create_process(
                             cmd, stdin=subprocess.PIPE, text=False
