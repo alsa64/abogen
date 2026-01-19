@@ -263,6 +263,7 @@ class ConversionThread(QThread):
         use_gpu=True,
         from_queue=False,
         save_base_path=None,
+        save_as_project=False,
     ):  # Add use_gpu parameter
         super().__init__()
         self._chapter_options_event = threading.Event()
@@ -286,6 +287,9 @@ class ConversionThread(QThread):
         self.processed_char_count = 0  # Initialize processed character count
         self.display_path = None  # Add variable for display path
         self.save_base_path = save_base_path  # Store the save base path
+        self.save_as_project = (
+            save_as_project  # Whether to save in project folder structure
+        )
         self.is_direct_text = (
             False  # Flag to indicate if input is from textbox rather than file
         )
@@ -459,7 +463,10 @@ class ConversionThread(QThread):
                 self.log_updated.emit(
                     f"- Output folder: {self.output_folder or os.getcwd()}"
                 )
-            elif self.save_option == "AudioBookshelf structure":
+            elif (
+                self.save_option == "AudioBookshelf structure"
+                and not self.save_as_project
+            ):
                 self.log_updated.emit(
                     f"- AudioBookshelf library: {self.output_folder or os.getcwd()}"
                 )
@@ -628,8 +635,11 @@ class ConversionThread(QThread):
                         "red",
                     )
                 )
-            # Handle AudioBookshelf structure
-            if self.save_option == "AudioBookshelf structure":
+            # Handle AudioBookshelf structure (but bypass if using project folder)
+            if (
+                self.save_option == "AudioBookshelf structure"
+                and not self.save_as_project
+            ):
                 # Create AudioBookshelf-compatible directory structure
                 audiobookshelf_dir = self._create_audiobookshelf_directory_structure(
                     parent_dir
@@ -1490,7 +1500,10 @@ class ConversionThread(QThread):
                 parent_dir = user_desktop_dir()
             elif self.save_option == "Save next to input file":
                 parent_dir = os.path.dirname(base_path)
-            elif self.save_option == "AudioBookshelf structure":
+            elif (
+                self.save_option == "AudioBookshelf structure"
+                and not self.save_as_project
+            ):
                 # For single file output with AudioBookshelf structure
                 audiobookshelf_dir = self._create_audiobookshelf_directory_structure(
                     self.output_folder or os.getcwd()
@@ -2554,6 +2567,7 @@ class ConversionThread(QThread):
         # Only create disc subfolders for AudioBookshelf structure with many chapters
         if (
             self.save_option == "AudioBookshelf structure"
+            and not self.save_as_project
             and hasattr(self, "_audiobookshelf_book_dir")
             and total_chapters >= 20
         ):

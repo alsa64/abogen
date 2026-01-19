@@ -2322,6 +2322,9 @@ class abogen(QWidget):
                 use_gpu=self.gpu_ok,
                 from_queue=from_queue,
                 save_base_path=self.displayed_file_path,  # Pass the save base path (original file for EPUB)
+                save_as_project=getattr(
+                    self, "save_as_project", False
+                ),  # Pass the project folder setting
             )  # Use gpu_ok status
             # Pass the displayed file path to the log_updated signal handler in ConversionThread
             self.conversion_thread.display_path = display_path
