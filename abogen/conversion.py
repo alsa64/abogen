@@ -2038,13 +2038,22 @@ class ConversionThread(QThread):
         else:
             metadata_options.extend(["-metadata", f"album_artist=Unknown"])
 
-        # Add composer metadata
+        # Add composer metadata - use voice model for TTS audiobooks
         if composer_match:
             metadata_options.extend(
                 ["-metadata", f"composer={composer_match.group(1)}"]
             )
         else:
-            metadata_options.extend(["-metadata", f"composer=Narrator"])
+            # Use the voice model name as composer for TTS-generated content
+            voice_composer = "Narrator"
+            if hasattr(self, "voice") and self.voice:
+                # Format voice name for composer field (e.g., "af_heart" -> "kokoro/af_heart")
+                voice_name = str(self.voice)
+                if not voice_name.startswith("kokoro/"):
+                    voice_composer = f"kokoro/{voice_name}"
+                else:
+                    voice_composer = voice_name
+            metadata_options.extend(["-metadata", f"composer={voice_composer}"])
 
         # Add genre metadata
         if genre_match:
