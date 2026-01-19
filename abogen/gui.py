@@ -123,6 +123,7 @@ class QueueItemWidget(QWidget):
         file_name = os.path.basename(self.file_path)
         self.name_label = QLabel(file_name)
         self.name_label.setStyleSheet("font-weight: bold;")
+        self.name_label.setToolTip(self.file_path)  # Show full path in tooltip
         layout.addWidget(self.name_label)
 
         # Status and progress layout
@@ -150,9 +151,28 @@ class QueueItemWidget(QWidget):
             "failed": "#cc0000",
         }
 
-        self.status_label.setText(self.status.capitalize())
+        status_icons = {
+            "pending": "⏳",
+            "processing": "⚡",
+            "completed": "✅",
+            "failed": "❌",
+        }
+
+        # Update status text with icon
+        icon = status_icons.get(self.status, "")
+        self.status_label.setText(f"{icon} {self.status.capitalize()}")
         color = status_colors.get(self.status, "#666666")
-        self.status_label.setStyleSheet(f"color: {color};")
+        self.status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+
+        # Enhanced widget styling based on status
+        widget_styles = {
+            "pending": "QWidget { border-left: 3px solid #666666; background-color: #f9f9f9; }",
+            "processing": "QWidget { border-left: 3px solid #0066cc; background-color: #f0f8ff; }",
+            "completed": "QWidget { border-left: 3px solid #00aa00; background-color: #f0fff0; }",
+            "failed": "QWidget { border-left: 3px solid #cc0000; background-color: #fff0f0; }",
+        }
+
+        self.setStyleSheet(widget_styles.get(self.status, ""))
 
         if self.status == "processing":
             self.progress_bar.setVisible(True)
@@ -169,6 +189,17 @@ class QueueItemWidget(QWidget):
         if progress is not None:
             self.progress = progress
         self.update_status_display()
+
+    def update_tooltip(self):
+        """Update tooltip with file path and settings information."""
+        tooltip = f"File: {self.file_path}\n\nSettings:\n"
+        if self.individual_settings:
+            for key, value in self.individual_settings.items():
+                if key not in ["gpu_ok"]:  # Skip technical settings
+                    tooltip += f"  {key.replace('_', ' ').title()}: {value}\n"
+        else:
+            tooltip += "  Using current settings"
+        self.setToolTip(tooltip)
 
 
 class DropAreaWidget(QWidget):
@@ -1714,6 +1745,7 @@ class abogen(QWidget):
 
                 # Capture current settings for this item
                 queue_item.individual_settings = self.capture_current_settings()
+                queue_item.update_tooltip()
 
                 self.queue_items.append(queue_item)
 
@@ -1728,6 +1760,7 @@ class abogen(QWidget):
                 added_count += 1
 
         self.update_queue_controls()
+        self.update_global_progress()
 
         # Provide user feedback
         if added_count > 0:
@@ -2098,6 +2131,7 @@ class abogen(QWidget):
     def update_queue_item_progress(self, queue_item, progress, etr):
         """Update progress for a specific queue item."""
         queue_item.set_status("processing", progress)
+        self.update_global_progress()
 
     def handle_queue_item_finished(self, queue_item, output, output_path):
         """Handle completion of queue item processing."""
@@ -2109,6 +2143,9 @@ class abogen(QWidget):
             queue_item.set_status("completed", 100)
         else:
             queue_item.set_status("failed", 0)
+
+        # Update global progress
+        self.update_global_progress()
 
         # Auto-start next pending item if this was started via "Start All"
         if hasattr(self, "_auto_process_queue") and self._auto_process_queue:
@@ -2125,6 +2162,72 @@ class abogen(QWidget):
         if hasattr(self, "_auto_process_queue"):
             self._auto_process_queue = False
         return False
+
+    def update_global_progress(self):
+        """Update global progress bar based on queue status."""
+        if not self.queue_items:
+            self.global_progress.setVisible(False)
+            self.status_bar.showMessage("Ready")
+            return
+
+        # Count items by status
+        total_items = len(self.queue_items)
+        completed_items = sum(
+            1 for item in self.queue_items if item.status == "completed"
+        )
+        failed_items = sum(1 for item in self.queue_items if item.status == "failed")
+        processing_items = sum(
+            1 for item in self.queue_items if item.status == "processing"
+        )
+        pending_items = sum(1 for item in self.queue_items if item.status == "pending")
+
+        # Calculate overall progress
+        if processing_items > 0:
+            # Get progress of currently processing item
+            processing_item_progress = 0
+            for item in self.queue_items:
+                if item.status == "processing":
+                    processing_item_progress = item.progress
+                    break
+
+            # Calculate global progress: (completed items + partial progress of current item) / total items
+            global_progress = (
+                (completed_items + processing_item_progress / 100.0) / total_items
+            ) * 100
+
+            self.global_progress.setVisible(True)
+            self.global_progress.setValue(int(global_progress))
+            self.status_bar.showMessage(
+                f"Processing... ({completed_items + 1}/{total_items}) - {processing_item_progress}%"
+            )
+
+        elif pending_items == 0:  # All items are completed or failed
+            if completed_items == total_items:
+                # All completed successfully
+                self.global_progress.setVisible(True)
+                self.global_progress.setValue(100)
+                self.status_bar.showMessage(
+                    f"✓ All {total_items} items completed successfully"
+                )
+            else:
+                # Some failed
+                self.global_progress.setVisible(True)
+                self.global_progress.setValue(100)
+                self.status_bar.showMessage(
+                    f"Finished: {completed_items} completed, {failed_items} failed"
+                )
+        else:
+            # Has pending items, not currently processing
+            if completed_items > 0:
+                progress = (completed_items / total_items) * 100
+                self.global_progress.setVisible(True)
+                self.global_progress.setValue(int(progress))
+                self.status_bar.showMessage(
+                    f"Paused: {completed_items}/{total_items} completed"
+                )
+            else:
+                self.global_progress.setVisible(False)
+                self.status_bar.showMessage(f"Queue ready: {total_items} items pending")
 
     def remove_queue_item(self, queue_item):
         """Remove item from queue."""
