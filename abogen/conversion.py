@@ -1379,12 +1379,12 @@ class ConversionThread(QThread):
             # Finalize merged output file ONLY if merging
             if merge_chapters_at_end:
                 self.log_updated.emit(("\nFinalizing audio. Please wait...", "grey"))
-                if self.output_format in ["wav", "mp3", "flac"]:
+                if self.output_format in ["wav", "mp3"]:
                     merged_out_file.close()
-                elif self.output_format == "m4b":
+                elif self.output_format in ["m4b", "flac", "opus"]:
                     ffmpeg_proc.stdin.close()
                     ffmpeg_proc.wait()
-                    # Add chapters via fast post-processing
+                    # Add chapters via fast post-processing (M4B, FLAC, Opus all support embedded chapters)
                     if total_chapters > 1:
                         chapters_info_path = f"{base_filepath_no_ext}_chapters.txt"
                         with open(chapters_info_path, "w", encoding="utf-8") as f:
@@ -1396,7 +1396,7 @@ class ConversionThread(QThread):
                                 f.write(f"START={int(chapter['start'] * 1000)}\n")
                                 f.write(f"END={int(chapter['end'] * 1000)}\n")
                                 f.write(f"title={chapter_title}\n\n")
-                        # Fast mux chapters into m4b (write to temp file, then replace original)
+                        # Fast mux chapters into format (write to temp file, then replace original)
                         static_ffmpeg.add_paths()
                         orig_path = merged_out_path
                         root, ext = os.path.splitext(orig_path)
@@ -1412,21 +1412,39 @@ class ConversionThread(QThread):
                             "-i",
                             chapters_info_path,
                         ]
+
+                        # Handle cover image embedding (M4B supports cover, FLAC and Opus can include it as metadata)
                         if cover_path and os.path.exists(cover_path):
-                            cmd.extend(
-                                [
-                                    "-i",
-                                    cover_path,
-                                    "-map",
-                                    "0:a",
-                                    "-map",
-                                    "2",
-                                    "-c:v",
-                                    "copy",
-                                    "-disposition:v",
-                                    "attached_pic",
-                                ]
-                            )
+                            if self.output_format == "m4b":
+                                cmd.extend(
+                                    [
+                                        "-i",
+                                        cover_path,
+                                        "-map",
+                                        "0:a",
+                                        "-map",
+                                        "2",
+                                        "-c:v",
+                                        "copy",
+                                        "-disposition:v",
+                                        "attached_pic",
+                                    ]
+                                )
+                            else:  # FLAC, Opus
+                                cmd.extend(
+                                    [
+                                        "-i",
+                                        cover_path,
+                                        "-map",
+                                        "0:a",
+                                        "-map",
+                                        "2",
+                                        "-c:v",
+                                        "copy",
+                                        "-disposition:v",
+                                        "attached_pic",
+                                    ]
+                                )
                         else:
                             cmd.extend(["-map", "0:a"])
 
@@ -1446,9 +1464,6 @@ class ConversionThread(QThread):
                         proc.wait()
                         os.replace(tmp_path, orig_path)
                         os.remove(chapters_info_path)
-                elif self.output_format in ["opus"]:
-                    ffmpeg_proc.stdin.close()
-                    ffmpeg_proc.wait()
                 self.progress_updated.emit(100, "00:00:00")
                 # Close merged subtitle file if open
                 if merged_subtitle_file:
