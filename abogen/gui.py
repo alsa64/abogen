@@ -3106,7 +3106,12 @@ class abogen(QWidget):
         # Update encoder dropdown
         self.encoder_combo.clear()
         encoders = format_config["encoders"]
-        if len(encoders) > 1:
+
+        # Always enable encoder dropdown for AAC format (even with single encoder)
+        # For other formats, enable only when multiple encoders are available
+        enable_encoder_combo = (len(encoders) > 1) or (format_key == "aac")
+
+        if enable_encoder_combo:
             self.encoder_combo.setEnabled(True)
             for encoder in encoders:
                 # Create friendly names for common encoders
