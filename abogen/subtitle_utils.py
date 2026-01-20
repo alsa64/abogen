@@ -4,7 +4,7 @@ from abogen.utils import detect_encoding, load_config
 from abogen.constants import SAMPLE_VOICE_TEXTS
 
 try:
-    from bs4 import BeautifulSoup, NavigableString
+    from bs4 import BeautifulSoup
 
     HAS_BS4 = True
 except ImportError:

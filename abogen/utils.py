@@ -5,7 +5,6 @@ import warnings
 import platform
 import shutil
 import subprocess
-import re
 from threading import Thread
 
 warnings.filterwarnings("ignore")
@@ -126,7 +125,7 @@ default_encoding = sys.getfilesystemencoding()
 def create_process(cmd, stdin=None, text=True, capture_output=False):
     import logging
 
-    logger = logging.getLogger(__name__)
+    logging.getLogger(__name__)
 
     # Configure root logger to output to console if not already configured
     root = logging.getLogger()

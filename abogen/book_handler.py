@@ -152,7 +152,6 @@ class HandlerDialog(QDialog):
                 f"EPUB file is missing a referenced file: {e}. Skipping missing file."
             )
             # Try to patch ebooklib to skip missing files (monkey-patch read_file)
-            import types
 
             orig_read_file = None
             try:
@@ -469,7 +468,7 @@ class HandlerDialog(QDialog):
         # Use cleaned text for stored content/length calculations
         cleaned_full_text = clean_text(original_text)
 
-        soup = BeautifulSoup(html, "html.parser")
+        BeautifulSoup(html, "html.parser")
         self.content_texts = {}
         self.content_lengths = {}
 
@@ -680,7 +679,7 @@ class HandlerDialog(QDialog):
                                 f"Found NAV HTML with TOC in: {item.get_name()}"
                             )
                             break
-                except Exception as e:
+                except Exception:
                     continue
         # 4. If no navigation item found by any method, trigger fallback
         if not nav_item or not nav_type:
@@ -1239,13 +1238,10 @@ class HandlerDialog(QDialog):
     def _build_epub_tree_fallback(self, toc_entries, parent_item):
         for entry in toc_entries:
             href, title, children = None, "Unknown", []
-            entry_obj = None
             if isinstance(entry, ebooklib.epub.Link):
                 href, title = entry.href, entry.title or entry.href
-                entry_obj = entry
             elif isinstance(entry, tuple) and len(entry) >= 1:
                 section_or_link = entry[0]
-                entry_obj = section_or_link
                 if isinstance(section_or_link, ebooklib.epub.Section):
                     title = section_or_link.title
                     href = getattr(section_or_link, "href", None)
@@ -1965,12 +1961,12 @@ class HandlerDialog(QDialog):
                     image_type = "gif"
 
                 html_content += (
-                    f"<div style='text-align: center; margin-bottom: 20px;'>"
+                    "<div style='text-align: center; margin-bottom: 20px;'>"
                 )
                 html_content += (
                     f"<img src='data:image/{image_type};base64,{image_data}' "
                 )
-                html_content += f"width='300' style='object-fit: contain;' /></div>"
+                html_content += "width='300' style='object-fit: contain;' /></div>"
             except Exception as e:
                 html_content += f"<p>Error displaying cover image: {str(e)}</p>"
 

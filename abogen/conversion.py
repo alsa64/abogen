@@ -13,7 +13,6 @@ from abogen.utils import (
 )
 from abogen.constants import (
     LANGUAGE_DESCRIPTIONS,
-    SAMPLE_VOICE_TEXTS,
     COLORS,
     CHAPTER_OPTIONS_COUNTDOWN,
     SUBTITLE_FORMATS,
@@ -26,12 +25,6 @@ import static_ffmpeg
 import threading  # for efficient waiting
 import subprocess
 import platform
-
-# Configuration constants
-_USER_RESPONSE_TIMEOUT = (
-    0.1  # Timeout in seconds for checking user response/cancellation
-)
-
 from abogen.subtitle_utils import (
     clean_text,
     parse_srt_file,
@@ -42,6 +35,11 @@ from abogen.subtitle_utils import (
     get_sample_voice_text,
     sanitize_name_for_os,
     _CHAPTER_MARKER_SEARCH_PATTERN,
+)
+
+# Configuration constants
+_USER_RESPONSE_TIMEOUT = (
+    0.1  # Timeout in seconds for checking user response/cancellation
 )
 
 
@@ -413,7 +411,7 @@ class ConversionThread(QThread):
             )
             self.log_updated.emit(f"- Save option: {self.save_option}")
             if self.replace_single_newlines:
-                self.log_updated.emit(f"- Replace single newlines: Yes")
+                self.log_updated.emit("- Replace single newlines: Yes")
 
             # Check if input is a subtitle file for additional configuration
             is_subtitle_input = False
@@ -836,7 +834,7 @@ class ConversionThread(QThread):
                         )
                         merged_subtitle_margin = "90" if is_narrow else ""
                         merged_subtitle_alignment_tag = (
-                            f"{{\\an5}}" if is_centered else ""
+                            "{\\an5}" if is_centered else ""
                         )
                     else:
                         merged_subtitle_file = open(
@@ -1036,7 +1034,7 @@ class ConversionThread(QThread):
                             )
                             chapter_subtitle_margin = "90" if is_narrow else ""
                             chapter_subtitle_alignment_tag = (
-                                f"{{\\an5}}" if is_centered else ""
+                                "{\\an5}" if is_centered else ""
                             )
                     else:
                         chapter_subtitle_file = None
@@ -1391,8 +1389,8 @@ class ConversionThread(QThread):
                             f.write(";FFMETADATA1\n")
                             for chapter in chapters_time:
                                 chapter_title = chapter["chapter"].replace("=", "\\=")
-                                f.write(f"[CHAPTER]\n")
-                                f.write(f"TIMEBASE=1/1000\n")
+                                f.write("[CHAPTER]\n")
+                                f.write("TIMEBASE=1/1000\n")
                                 f.write(f"START={int(chapter['start'] * 1000)}\n")
                                 f.write(f"END={int(chapter['end'] * 1000)}\n")
                                 f.write(f"title={chapter_title}\n\n")
@@ -1988,7 +1986,7 @@ class ConversionThread(QThread):
                     ffmpeg_proc.wait()
                 if "subtitle_file" in locals() and subtitle_file:
                     subtitle_file.close()
-            except:
+            except Exception:
                 pass
             self.log_updated.emit((f"Error processing subtitle file: {str(e)}", "red"))
             self.conversion_finished.emit(("Audio generation failed.", "red"), None)
@@ -2068,7 +2066,7 @@ class ConversionThread(QThread):
         if artist_match:
             metadata_options.extend(["-metadata", f"artist={artist_match.group(1)}"])
         else:
-            metadata_options.extend(["-metadata", f"artist=Unknown"])
+            metadata_options.extend(["-metadata", "artist=Unknown"])
 
         # Add album metadata
         if album_match:
@@ -2092,7 +2090,7 @@ class ConversionThread(QThread):
                 ["-metadata", f"album_artist={album_artist_match.group(1)}"]
             )
         else:
-            metadata_options.extend(["-metadata", f"album_artist=Unknown"])
+            metadata_options.extend(["-metadata", "album_artist=Unknown"])
 
         # Add composer metadata - use voice model for TTS audiobooks
         if composer_match:
@@ -2115,7 +2113,7 @@ class ConversionThread(QThread):
         if genre_match:
             metadata_options.extend(["-metadata", f"genre={genre_match.group(1)}"])
         else:
-            metadata_options.extend(["-metadata", f"genre=Audiobook"])
+            metadata_options.extend(["-metadata", "genre=Audiobook"])
 
         # Add AudioBookshelf-specific metadata
         if language_match:
@@ -2319,7 +2317,7 @@ class ConversionThread(QThread):
             try:
                 with open(desc_path, "w", encoding="utf-8") as f:
                     f.write(description_match.group(1).strip())
-                self.log_updated.emit(f"Created desc.txt")
+                self.log_updated.emit("Created desc.txt")
             except Exception as e:
                 self.log_updated.emit(
                     (f"Warning: Could not create desc.txt: {e}", "orange")
@@ -2334,7 +2332,7 @@ class ConversionThread(QThread):
         try:
             with open(reader_path, "w", encoding="utf-8") as f:
                 f.write(narrator)
-            self.log_updated.emit(f"Created reader.txt")
+            self.log_updated.emit("Created reader.txt")
         except Exception as e:
             self.log_updated.emit(
                 (f"Warning: Could not create reader.txt: {e}", "orange")
@@ -2389,7 +2387,7 @@ class ConversionThread(QThread):
 
             with open(opf_path, "w", encoding="utf-8") as f:
                 f.write(opf_content)
-            self.log_updated.emit(f"Created metadata.opf")
+            self.log_updated.emit("Created metadata.opf")
         except Exception as e:
             self.log_updated.emit(
                 (f"Warning: Could not create metadata.opf: {e}", "orange")
@@ -2519,7 +2517,6 @@ class ConversionThread(QThread):
         # But preserve "Last, First" format within individual authors
 
         # First, split on obvious multi-author separators
-        authors = []
 
         # Split on semicolon
         if ";" in author_string:
@@ -2749,7 +2746,7 @@ class ConversionThread(QThread):
                     full_text = ""
                     char_to_token = []  # Maps character index to token index
                     for idx, token in enumerate(processed_tokens):
-                        start_char = len(full_text)
+                        len(full_text)
                         text_part = token["text"] + (token.get("whitespace", "") or "")
                         full_text += text_part
                         char_to_token.extend([idx] * len(text_part))

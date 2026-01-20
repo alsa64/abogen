@@ -1199,7 +1199,7 @@ class VoiceFormulaDialog(QDialog):
                 orig_name = next(iter(imported_profiles.keys()))
                 msg = f"Profile '{orig_name}' will be imported."
                 if collisions:
-                    msg += f"\nThis will overwrite an existing profile."
+                    msg += "\nThis will overwrite an existing profile."
                 msg += "\nContinue?"
                 reply = QMessageBox.question(
                     self,
@@ -1258,7 +1258,7 @@ class VoiceFormulaDialog(QDialog):
         item = self.profile_list.itemAt(pos)
         if not item:
             return
-        name = item.text().lstrip("*")
+        item.text().lstrip("*")
         menu = QMenu(self)
         rename_act = QAction("Rename", self)
         delete_act = QAction("Delete", self)
@@ -1327,7 +1327,7 @@ class VoiceFormulaDialog(QDialog):
 
         while True:
             new, ok = QInputDialog.getText(
-                self, "Rename Profile", f"Profile name:", text=old
+                self, "Rename Profile", "Profile name:", text=old
             )
             if not ok or not new or new == old:
                 break

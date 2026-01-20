@@ -308,10 +308,9 @@ class QueueManager(QDialog):
             )
 
             # Only show the file name, not the full path
-            display_name = display_file_path
 
             if os.path.sep in display_file_path:
-                display_name = os.path.basename(display_file_path)
+                os.path.basename(display_file_path)
             # Get icon for the display file
             icon = icon_provider.icon(QFileInfo(display_file_path))
             list_item = QListWidgetItem()
@@ -693,7 +692,7 @@ class QueueManager(QDialog):
 
                 if not os.path.exists(target_path):
                     QMessageBox.warning(
-                        self, "File Not Found", f"The file does not exist."
+                        self, "File Not Found", "The file does not exist."
                     )
                     return
                 QDesktopServices.openUrl(QUrl.fromLocalFile(target_path))
@@ -806,7 +805,7 @@ class QueueManager(QDialog):
                             )
                             if not os.path.exists(target_path):
                                 QMessageBox.warning(
-                                    self, "File Not Found", f"The file does not exist."
+                                    self, "File Not Found", "The file does not exist."
                                 )
                                 return
                             folder = os.path.dirname(target_path)
@@ -845,7 +844,7 @@ class QueueManager(QDialog):
             reply = QMessageBox.question(
                 self,
                 "Confirm Cancel",
-                f"Are you sure you want to cancel and discard all changes?",
+                "Are you sure you want to cancel and discard all changes?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

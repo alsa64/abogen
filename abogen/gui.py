@@ -23,7 +23,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QFileDialog,
     QProgressBar,
-    QFrame,
     QStyleFactory,
     QInputDialog,
     QFileIconProvider,
@@ -59,9 +58,6 @@ from PyQt6.QtGui import (
     QTextCursor,
     QDesktopServices,
     QIcon,
-    QPixmap,
-    QPainter,
-    QPolygon,
     QColor,
     QMovie,
     QPalette,
@@ -99,6 +95,25 @@ import threading
 from abogen.voice_formula_gui import VoiceFormulaDialog
 from abogen.voice_profiles import load_profiles
 from abogen.pronunciation import get_pronunciation_config_path
+
+# Subtitle generation options
+SUBTITLE_OPTIONS = [
+    "Disabled",
+    "Line",
+    "Sentence",
+    "Sentence + Comma",
+    "Sentence + Highlighting",
+    "1 word",
+    "2 words",
+    "3 words",
+    "4 words",
+    "5 words",
+    "6 words",
+    "7 words",
+    "8 words",
+    "9 words",
+    "10 words",
+]
 
 
 class QueueItemWidget(QWidget):
@@ -1017,7 +1032,7 @@ def detect_ffmpeg_encoders():
         return {}
 
 
-def get_audio_format_config():
+def get_audio_format_config(save_individual_chapters=False):
     """Get audio format configuration with available encoders."""
     encoders = detect_ffmpeg_encoders()
 
@@ -1049,14 +1064,16 @@ def get_audio_format_config():
             "extension": "mp3",
         },
         "aac": {
-            "name": "AAC (M4B with chapters)",
-            "container": "m4b",
+            "name": "AAC (M4A single chapters)"
+            if save_individual_chapters
+            else "AAC (M4B with chapters)",
+            "container": "m4a" if save_individual_chapters else "m4b",
             "encoders": encoders.get("aac", ["aac"]),
             "default_encoder": "aac",
             "supports_bitrate": True,
             "bitrates": ["96k", "128k", "160k", "192k", "256k", "320k"],
             "default_bitrate": "160k",
-            "extension": "m4b",
+            "extension": "m4a" if save_individual_chapters else "m4b",
         },
         "opus": {
             "name": "Opus (Best compression)",
@@ -1084,9 +1101,13 @@ class abogen(QWidget):
 
         # Set default AudioBookshelf directory
         default_audiobooks_dir = os.path.expanduser("~/Books/AudioBooks")
-        self.selected_output_folder = os.path.expanduser(
-            self.config.get("selected_output_folder", default_audiobooks_dir)
+        config_output_folder = self.config.get(
+            "selected_output_folder", default_audiobooks_dir
         )
+        # Ensure we never pass None to os.path.expanduser
+        if config_output_folder is None:
+            config_output_folder = default_audiobooks_dir
+        self.selected_output_folder = os.path.expanduser(config_output_folder)
         self.selected_file = self.selected_file_type = self.selected_book_path = None
         self.displayed_file_path = (
             None  # Add new variable to track the displayed file path
@@ -1117,8 +1138,12 @@ class abogen(QWidget):
         self.silence_duration = self.config.get(
             "silence_duration", 2.0
         )  # Default silence duration
+        self.save_individual_chapters = self.config.get(
+            "save_individual_chapters", False
+        )
+
         # Load audio format configuration
-        self.audio_formats = get_audio_format_config()
+        self.audio_formats = get_audio_format_config(self.save_individual_chapters)
 
         # Load format settings with new structure
         self.selected_format = self.config.get(
@@ -1259,7 +1284,9 @@ class abogen(QWidget):
         self.setLayout(main_layout)
 
         # Initialize essential attributes for compatibility
-        self.audio_formats = get_audio_format_config()
+        self.audio_formats = get_audio_format_config(
+            getattr(self, "save_individual_chapters", False)
+        )
         self.selected_format = self.config.get("selected_format", "aac")
         self.selected_encoder = None
         self.selected_bitrate = None
@@ -1315,7 +1342,7 @@ class abogen(QWidget):
         queue_controls.addWidget(self.btn_clear_queue)
         queue_layout.addLayout(queue_controls)
 
-        sidebar_layout.addWidget(queue_group)
+        sidebar_layout.addWidget(queue_group, 1)  # Queue expands to fill space
 
         # Drop area section
         drop_group = QGroupBox("Add New Items")
@@ -1332,8 +1359,7 @@ class abogen(QWidget):
         self.btn_start_selected.clicked.connect(self.start_selected_processing)
         drop_layout.addWidget(self.btn_start_selected)
 
-        sidebar_layout.addWidget(drop_group)
-        sidebar_layout.addStretch()
+        sidebar_layout.addWidget(drop_group, 0)  # Add New Items stays at bottom
 
         # Right main content area
         self.main_content = QWidget()
@@ -1466,6 +1492,7 @@ class abogen(QWidget):
         self.format_combo.setStyleSheet(
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
         )
+        format_layout.addWidget(self.format_combo)
 
         # Encoder dropdown
         format_layout.addWidget(QLabel("Encoder:"))
@@ -1473,13 +1500,20 @@ class abogen(QWidget):
         self.encoder_combo.setStyleSheet(
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
         )
+        format_layout.addWidget(self.encoder_combo)
 
-        # Bitrate dropdown
+        # Bitrate slider
         format_layout.addWidget(QLabel("Bitrate:"))
-        self.bitrate_combo = QComboBox()
-        self.bitrate_combo.setStyleSheet(
-            "QComboBox { min-height: 20px; padding: 6px 12px; }"
-        )
+        self.bitrate_slider = QSlider(Qt.Orientation.Horizontal)
+        self.bitrate_slider.setMinimum(16)
+        self.bitrate_slider.setMaximum(256)
+        self.bitrate_slider.setValue(128)
+        self.bitrate_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.bitrate_slider.setTickInterval(32)
+        format_layout.addWidget(self.bitrate_slider)
+
+        self.bitrate_value_label = QLabel("128k")
+        format_layout.addWidget(self.bitrate_value_label)
 
         # Populate and connect
         for key, config in self.audio_formats.items():
@@ -1491,38 +1525,21 @@ class abogen(QWidget):
 
         self.format_combo.currentIndexChanged.connect(self.on_format_changed)
         self.encoder_combo.currentIndexChanged.connect(self.on_encoder_changed)
-        self.bitrate_combo.currentIndexChanged.connect(self.on_bitrate_changed)
-
-        format_layout.addWidget(self.format_combo)
-        format_layout.addWidget(self.encoder_combo)
-        format_layout.addWidget(self.bitrate_combo)
+        self.bitrate_slider.valueChanged.connect(self.on_bitrate_changed)
         layout.addLayout(format_layout)
 
         # Update encoder/bitrate options
         self.update_encoder_bitrate_options()
 
-        # Separate chapters format
-        chapters_layout = QHBoxLayout()
-        chapters_layout.addWidget(QLabel("Separate chapters format:"))
-        self.separate_chapters_combo = QComboBox()
-        for fmt in ["wav", "flac", "mp3", "aac", "opus"]:
-            self.separate_chapters_combo.addItem(fmt.upper(), fmt)
-
-        # Set saved value
-        current_fmt = getattr(self, "separate_chapters_format", "wav")
-        idx = self.separate_chapters_combo.findData(current_fmt)
-        if idx >= 0:
-            self.separate_chapters_combo.setCurrentIndex(idx)
-
-        self.separate_chapters_combo.currentIndexChanged.connect(
-            lambda i: setattr(
-                self,
-                "separate_chapters_format",
-                self.separate_chapters_combo.currentData(),
-            )
+        # Chapter handling option
+        chapter_checkbox_layout = QHBoxLayout()
+        self.save_individual_chapters_checkbox = QCheckBox("Save individual chapters")
+        self.save_individual_chapters_checkbox.setChecked(self.save_individual_chapters)
+        self.save_individual_chapters_checkbox.stateChanged.connect(
+            self.on_save_individual_chapters_changed
         )
-        chapters_layout.addWidget(self.separate_chapters_combo)
-        layout.addLayout(chapters_layout)
+        chapter_checkbox_layout.addWidget(self.save_individual_chapters_checkbox)
+        layout.addLayout(chapter_checkbox_layout)
 
         parent_layout.addWidget(group)
 
@@ -1541,7 +1558,7 @@ class abogen(QWidget):
         # Populate voice combo
         for i, voice_data in enumerate(VOICES_INTERNAL):
             lang_code = voice_data[0]
-            language_name = LANGUAGE_NAMES.get(lang_code, lang_code)
+            language_name = LANGUAGE_DESCRIPTIONS.get(lang_code, lang_code)
             is_female = voice_data[1] == "f"
             gender_icon = "♀" if is_female else "♂"
             display_name = f"{gender_icon} {language_name}"
@@ -1642,7 +1659,7 @@ class abogen(QWidget):
             "QComboBox { min-height: 20px; padding: 6px 12px; }"
         )
 
-        for text, value in SUBTITLE_FORMATS.items():
+        for value, text in SUBTITLE_FORMATS:
             self.subtitle_format_combo.addItem(text, value)
 
         # Set saved format
@@ -2250,52 +2267,56 @@ class abogen(QWidget):
             self.update_queue_controls()
 
     # Settings event handlers
-    def on_save_option_changed(self, index):
-        """Handle save option change."""
-        options = [
-            "AudioBookshelf structure",
-            "Save next to input file",
-            "Save to Desktop",
-            "Choose output folder",
-        ]
-        if index < len(options):
-            self.save_option = options[index]
-            self.config["save_option"] = self.save_option
-
-            # Update path display
-            if (
-                self.save_option == "AudioBookshelf structure"
-                and self.selected_output_folder
-            ):
-                self.save_path_label.setText(self.selected_output_folder)
-                self.save_path_row_widget.show()
-            elif self.save_option == "Choose output folder":
-                folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
-                if folder:
-                    self.selected_output_folder = folder
-                    self.config["selected_output_folder"] = folder
-                    self.save_path_label.setText(folder)
-                    self.save_path_row_widget.show()
-                else:
-                    self.save_path_row_widget.hide()
-            else:
-                self.save_path_row_widget.hide()
-
     def on_format_changed(self, index):
         """Handle format change."""
         self.selected_format = self.format_combo.currentData()
         self.config["selected_format"] = self.selected_format
         self.update_encoder_bitrate_options()
+        save_config(self.config)
 
     def on_encoder_changed(self, index):
         """Handle encoder change."""
         self.selected_encoder = self.encoder_combo.currentData()
         self.config["selected_encoder"] = self.selected_encoder
+        save_config(self.config)
 
-    def on_bitrate_changed(self, index):
-        """Handle bitrate change."""
-        self.selected_bitrate = self.bitrate_combo.currentData()
+    def on_bitrate_changed(self, value):
+        if value == 16:
+            self.selected_bitrate = None
+            self.bitrate_value_label.setText("default")
+        else:
+            self.selected_bitrate = f"{value}k"
+            self.bitrate_value_label.setText(f"{value}k")
         self.config["selected_bitrate"] = self.selected_bitrate
+        save_config(self.config)
+
+    def on_save_individual_chapters_changed(self, state):
+        """Handle save individual chapters checkbox change."""
+        self.save_individual_chapters = state == Qt.CheckState.Checked.value
+        self.config["save_individual_chapters"] = self.save_individual_chapters
+        save_config(self.config)
+        self.refresh_format_options()  # Refresh format options
+
+    def refresh_format_options(self):
+        self.audio_formats = get_audio_format_config(
+            getattr(self, "save_individual_chapters", False)
+        )
+
+        current_format = self.format_combo.currentData()
+        self.encoder_combo.currentData()
+        getattr(self, "selected_bitrate", None)
+
+        self.format_combo.clear()
+        for key, config in self.audio_formats.items():
+            self.format_combo.addItem(config["name"], key)
+
+        idx = self.format_combo.findData(current_format)
+        if idx >= 0:
+            self.format_combo.setCurrentIndex(idx)
+        else:
+            self.format_combo.setCurrentIndex(0)
+
+        self.on_format_changed(self.format_combo.currentIndex())
 
     def voice_changed(self, index):
         """Handle voice selection change."""
@@ -2303,16 +2324,6 @@ class abogen(QWidget):
         self.selected_voice = voice_data
         self.selected_lang = voice_data[0] if voice_data else None
         self.config["selected_voice"] = voice_data
-
-    def on_subtitle_mode_changed(self, index):
-        """Handle subtitle mode change."""
-        if index < len(SUBTITLE_OPTIONS):
-            subtitle_mode = SUBTITLE_OPTIONS[index]
-            self.config["subtitle_mode"] = subtitle_mode
-
-    def set_subtitle_format(self, format_value):
-        """Set subtitle format."""
-        self.config["subtitle_format"] = format_value
 
     def on_replace_newlines_changed(self, state):
         """Handle replace newlines checkbox."""
@@ -2339,11 +2350,6 @@ class abogen(QWidget):
         QMessageBox.information(
             self, "Voice Preview", "Voice preview will be implemented in Phase 4"
         )
-
-    def populate_profiles_in_voice_combo(self):
-        """Populate voice profiles - compatibility method."""
-        # This method is called by old code, keeping it for compatibility
-        pass
 
     def open_file_dialog(self):
         if self.is_converting:
@@ -2613,8 +2619,8 @@ class abogen(QWidget):
                 )
 
     def update_speed_label(self):
-        s = self.speed_slider.value() / 100.0
-        self.speed_label.setText(f"{s}")
+        s = self.speed_slider.value() / 10.0
+        self.speed_value_label.setText(f"{s}x")
         self.config["speed"] = s
         save_config(self.config)
 
@@ -2660,7 +2666,7 @@ class abogen(QWidget):
                     item.setEnabled(False)
 
         # If current selection is disabled, switch to a valid one
-        current_text = self.subtitle_combo.currentText()
+        self.subtitle_combo.currentText()
         current_idx = self.subtitle_combo.currentIndex()
         current_item = model.item(current_idx)
 
@@ -3495,7 +3501,16 @@ class abogen(QWidget):
         if self.open_file_btn:
             self.open_file_btn.show()
 
-    def on_save_option_changed(self, option):
+    def on_save_option_changed(self, index):
+        options = [
+            "AudioBookshelf structure",
+            "Save next to input file",
+            "Save to Desktop",
+            "Choose output folder",
+        ]
+        if index >= len(options):
+            return
+        option = options[index]
         self.save_option = option
         self.config["save_option"] = option
 
@@ -3922,7 +3937,10 @@ class abogen(QWidget):
                 "Cancel Error", f"Could not cancel conversion:\n{e}"
             )
 
-    def on_subtitle_mode_changed(self, mode):
+    def on_subtitle_mode_changed(self, index):
+        if index >= len(SUBTITLE_OPTIONS):
+            return
+        mode = SUBTITLE_OPTIONS[index]
         self.subtitle_mode = mode
         self.config["subtitle_mode"] = mode
         save_config(self.config)
@@ -4015,61 +4033,44 @@ class abogen(QWidget):
             )
             self.selected_encoder = encoders[0] if encoders else None
 
-        # Update bitrate dropdown
-        self.bitrate_combo.clear()
         if format_config.get("supports_bitrate", False):
-            self.bitrate_combo.setEnabled(True)
+            self.bitrate_slider.setEnabled(True)
             bitrates = format_config.get("bitrates", [])
-            for bitrate in bitrates:
-                self.bitrate_combo.addItem(bitrate, bitrate)
 
-            # Set current bitrate
-            if self.selected_bitrate:
-                idx = self.bitrate_combo.findData(self.selected_bitrate)
-                if idx >= 0:
-                    self.bitrate_combo.setCurrentIndex(idx)
-            else:
-                # Set default bitrate
-                default_bitrate = format_config.get(
-                    "default_bitrate", bitrates[0] if bitrates else None
-                )
-                if default_bitrate:
-                    idx = self.bitrate_combo.findData(default_bitrate)
-                    if idx >= 0:
-                        self.bitrate_combo.setCurrentIndex(idx)
-                        self.selected_bitrate = default_bitrate
+            if bitrates:
+                numeric_bitrates = []
+                for bitrate in bitrates:
+                    try:
+                        numeric_bitrates.append(int(bitrate.replace("k", "")))
+                    except ValueError:
+                        continue
+
+                if numeric_bitrates:
+                    min_bitrate = min(numeric_bitrates)
+                    max_bitrate = max(numeric_bitrates)
+                    self.bitrate_slider.setRange(16, max_bitrate)
+
+                    # Set current bitrate
+                    if self.selected_bitrate:
+                        try:
+                            current_value = int(self.selected_bitrate.replace("k", ""))
+                            self.bitrate_slider.setValue(current_value)
+                        except (ValueError, AttributeError):
+                            default_bitrate = format_config.get(
+                                "default_bitrate", f"{min_bitrate}k"
+                            )
+                            default_value = int(default_bitrate.replace("k", ""))
+                            self.bitrate_slider.setValue(default_value)
+                    else:
+                        default_bitrate = format_config.get(
+                            "default_bitrate", f"{min_bitrate}k"
+                        )
+                        default_value = int(default_bitrate.replace("k", ""))
+                        self.bitrate_slider.setValue(default_value)
         else:
-            self.bitrate_combo.setEnabled(False)
-            self.bitrate_combo.addItem("N/A", None)
+            self.bitrate_slider.setEnabled(False)
+            self.bitrate_value_label.setText("N/A")
             self.selected_bitrate = None
-
-    def on_format_changed(self, index):
-        """Handle format dropdown change."""
-        format_key = self.format_combo.currentData()
-        self.selected_format = format_key
-        self.config["selected_format"] = format_key
-
-        # Update encoder and bitrate options
-        self.update_encoder_bitrate_options()
-
-        # Save all current settings
-        self.config["selected_encoder"] = self.selected_encoder
-        self.config["selected_bitrate"] = self.selected_bitrate
-        save_config(self.config)
-
-    def on_encoder_changed(self, index):
-        """Handle encoder dropdown change."""
-        encoder = self.encoder_combo.currentData()
-        self.selected_encoder = encoder
-        self.config["selected_encoder"] = encoder
-        save_config(self.config)
-
-    def on_bitrate_changed(self, index):
-        """Handle bitrate dropdown change."""
-        bitrate = self.bitrate_combo.currentData()
-        self.selected_bitrate = bitrate
-        self.config["selected_bitrate"] = bitrate
-        save_config(self.config)
 
     def get_output_format_for_conversion(self):
         """Get the output format in the old format for compatibility."""
@@ -5019,7 +5020,7 @@ Categories=AudioVideo;Audio;Utility;
             try:
                 remote_num = int("".join(remote_version.split(".")))
                 local_num = int("".join(local_version.split(".")))
-            except ValueError as ve:
+            except ValueError:
                 return
 
             if remote_num > local_num:
